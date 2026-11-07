@@ -6,10 +6,13 @@ capnp eval -b 04_unions.capnp test1 > 04_unions.bin
 capnp eval -b 05_default_values.capnp test > 05_default_values.bin
 capnp eval -b 07_bits_and_floats.capnp test > 07_bits_and_floats.bin
 
-capnp compile -o - /usr/include/capnp/schema.capnp > 06_schema.capnp.original.bin
+capnp compile -o - /usr/local/include/capnp/schema.capnp > 06_schema.capnp.original.bin
 capnp convert binary:binary --segment-size=8000000 < 06_schema.capnp.original.bin > 06_schema.capnp.original.1.bin
 
-capnp eval -I/usr/include/capnp -b 08-schema-examples.capnp void > 08-schema-examples.void.bin
-capnp eval -I/usr/include/capnp -b 08-schema-examples.capnp field1 > 08-schema-examples.field1.bin
-capnp eval -I/usr/include/capnp -b 08-schema-examples.capnp node > 08-schema-examples.node.bin
+capnp eval -I/usr/local/include/capnp -b 08-schema-examples.capnp void > 08-schema-examples.void.bin
+capnp eval -I/usr/local/include/capnp -b 08-schema-examples.capnp field1 > 08-schema-examples.field1.bin
+capnp eval -I/usr/local/include/capnp -b 08-schema-examples.capnp node > 08-schema-examples.node.bin
 
+# capnp eval -b 08-schema-examples.capnp void > 08-schema-examples.void.bin
+# capnp eval -b 08-schema-examples.capnp field1 > 08-schema-examples.field1.bin
+# capnp eval -b 08-schema-examples.capnp node > 08-schema-examples.node.bin

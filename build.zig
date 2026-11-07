@@ -14,14 +14,18 @@ pub fn build(b: *std.Build) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
-
-    const lib = b.addStaticLibrary(.{
-        .name = "zig-capnp",
+    const capnp_mod = b.addModule("capnp", .{
+        .target = target,
+        .optimize = optimize,
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
         .root_source_file = b.path("src/capnp.zig"),
-        .target = target,
-        .optimize = optimize,
+    });
+
+    const lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = "zig-capnp",
+        .root_module = capnp_mod,
     });
 
     // This declares intent for the library to be installed into the standard
@@ -29,13 +33,19 @@ pub fn build(b: *std.Build) void {
     // running `zig build`).
     b.installArtifact(lib);
 
+    const compiler_mod = b.addModule("capnpc", .{
+        .target = target,
+        .optimize = optimize,
+        // In this case the main source file is merely a path, however, in more
+        // complicated build scripts, this could be a generated file.
+        .root_source_file = b.path("src/compiler.zig"),
+    });
+
     const compiler_exe = b.addExecutable(.{
         .name = "zig-capnp",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
-        .root_source_file = b.path("src/compiler.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = compiler_mod,
     });
 
     b.installArtifact(compiler_exe);
@@ -43,9 +53,11 @@ pub fn build(b: *std.Build) void {
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const main_tests = b.addTest(.{
-        .root_source_file = b.path("src/capnp.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = capnp_mod,
+        .test_runner = .{
+            .mode = .simple,
+            .path = b.path("test_runner.zig"),
+        },
     });
 
     const run_main_tests = b.addRunArtifact(main_tests);

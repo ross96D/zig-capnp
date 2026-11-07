@@ -75,49 +75,55 @@ pub const Ptr = union(enum) {
     }
 };
 
-pub const Error = Counter.Error;
+pub const Error = error{
+    LimitExceeded,
+    OutOfBounds,
+    InvalidPointer,
+    OffsetOverflow,
+    TypeMismatch,
+    TraversalLimitExceeded,
+    DepthLimitExceeded,
+    MessageTooLarge,
+    SegmentLimitReached,
+    RootAlreadyInitialized,
+    NotInitialized,
+};
+
+pub const BuildError = Allocator.Error || Error;
 
 pub const Counter = struct {
     count: usize = 0,
     limit: usize,
 
-    pub const Error = error{
-        LimitExceeded,
-    };
-
-    pub fn increment(self: *Counter, x: usize) Counter.Error!void {
-        self.count += x;
+    pub fn increment(self: *Counter, x: usize) Error!void {
+        self.count = std.math.add(usize, self.count, x) catch return Error.LimitExceeded;
 
         if (self.count >= self.limit) {
-            return Counter.Error.LimitExceeded;
+            return Error.LimitExceeded;
         }
     }
 };
 
 pub const ReadContext = struct {
-    const Error = error{
-        OutOfBounds,
-    };
-
     segments: [][]u8,
     segment: u32,
-    offsetWords: u29,
+    offset_words: u29,
 
     depth_counter: Counter = Counter{ .limit = 64 },
     traversal_counter: *Counter,
 
     pub fn offsetBytes(self: ReadContext) u32 {
-        // Zig’s slices do bounds checking for us.
-        return self.offsetWords * 8;
+        return self.offset_words << 3;
     }
 
     pub fn relativeWords(self: *ReadContext, dx: i30) void {
-        self.offsetWords = @intCast(dx + self.offsetWords);
+        self.offset_words = @intCast(dx + self.offset_words);
     }
 
-    pub fn readIntWithBound(self: ReadContext, comptime T: type, offset: u32, boundWords: u29) T {
+    pub fn readIntWithBound(self: ReadContext, comptime T: type, offset: u32, bound_words: u29) T {
         const pos = self.offsetBytes() + @sizeOf(T) * offset;
-        return if (@sizeOf(T) * offset < boundWords << 3) std.mem.readInt(T, self.segments[self.segment][pos..][0..@sizeOf(T)], .little) else 0;
+        std.debug.print("POS {} {}\n", .{ pos, self.segments[self.segment].len });
+        return if (@sizeOf(T) * offset < bound_words << 3) std.mem.readInt(T, self.segments[self.segment][pos..][0..@sizeOf(T)], .little) else 0;
     }
 
     pub fn readInt(self: ReadContext, comptime T: type, offset: u32) T {
@@ -129,7 +135,7 @@ pub const ReadContext = struct {
         return Ptr.of_u64(self.readInt(u64, 0));
     }
 
-    pub fn readPtr(self: *ReadContext) Counter.Error!Ptr {
+    pub fn readPtr(self: *ReadContext) Error!Ptr {
         const ptr = self.readPtrN();
         switch (ptr) {
             .struct_ => |x| {
@@ -150,7 +156,7 @@ pub const ReadContext = struct {
                 } else {
                     // TODO: explicitly check segment bounds
                     self.segment = x.segment;
-                    self.offsetWords = x.offset;
+                    self.offset_words = x.offset;
                 }
             },
             else => {},
@@ -167,7 +173,7 @@ pub const ReadContext = struct {
         return ReadContext{
             .segments = segments,
             .segment = 0,
-            .offsetWords = 0,
+            .offset_words = 0,
             .traversal_counter = traversal_counter,
         };
     }
@@ -175,7 +181,7 @@ pub const ReadContext = struct {
     pub fn format(value: ReadContext, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = options;
         _ = fmt;
-        try writer.print("{{segments = {}, segment = {}, offsetWords = {}}}", .{ value.segments.len, value.segment, value.offsetWords });
+        try writer.print("{{segments = {}, segment = {}, offsetWords = {}}}", .{ value.segments.len, value.segment, value.offset_words });
     }
 };
 
@@ -188,7 +194,7 @@ pub const AnyPointerReader = struct {
     context: ReadContext,
     ptr: Ptr,
 
-    pub fn fromReadContext(context: ReadContext) Counter.Error!AnyPointerReader {
+    pub fn fromReadContext(context: ReadContext) Error!AnyPointerReader {
         var _context = context;
         const ptr = try _context.readPtr();
 
@@ -201,11 +207,11 @@ pub const AnyPointerReader = struct {
 
 pub const StructReader = struct {
     context: ReadContext,
-    dataWords: u16,
-    ptrWords: u16,
+    data_words: u16,
+    ptr_words: u16,
 
     pub fn readIntField(self: StructReader, comptime T: type, offset: u32) T {
-        return self.context.readIntWithBound(T, offset, self.dataWords);
+        return self.context.readIntWithBound(T, offset, self.data_words);
     }
 
     pub fn readBoolField(self: StructReader, comptime offset: u32) bool {
@@ -215,11 +221,11 @@ pub const StructReader = struct {
         return self.readIntField(u8, bucket) >> shift == 1;
     }
 
-    pub fn readPtrField(self: StructReader, comptime T: type, ptrNo: u16) Counter.Error!T {
-        if (ptrNo < self.ptrWords) {
-            std.debug.assert(ptrNo < self.ptrWords);
+    pub fn readPtrField(self: StructReader, comptime T: type, ptrNo: u16) Error!T {
+        if (ptrNo < self.ptr_words) {
+            std.debug.assert(ptrNo < self.ptr_words);
             var context = self.context;
-            context.relativeWords(self.dataWords + ptrNo);
+            context.relativeWords(self.data_words + ptrNo);
             return try T.fromReadContext(context);
         } else {
             unreachable;
@@ -228,7 +234,7 @@ pub const StructReader = struct {
 
     pub fn readVoid(_: StructBuilder) void {}
 
-    pub fn readStringField(self: StructReader, ptrNo: u16) Counter.Error![]u8 {
+    pub fn readStringField(self: StructReader, ptrNo: u16) Error![]u8 {
         return (try self.readPtrField(ListReader(u8), ptrNo)).getString();
     }
 
@@ -241,21 +247,21 @@ pub const StructReader = struct {
         return @bitCast(self.readIntField(U, offset));
     }
 
-    pub fn fromReadContext(context: ReadContext) Counter.Error!StructReader {
+    pub fn fromReadContext(context: ReadContext) Error!StructReader {
         var _context = context;
         const struct_ = (try _context.readPtr()).struct_;
 
         return StructReader{
             .context = _context,
-            .dataWords = struct_.dataWords,
-            .ptrWords = struct_.ptrWords,
+            .data_words = struct_.dataWords,
+            .ptr_words = struct_.ptrWords,
         };
     }
 
     pub fn format(value: StructReader, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = options;
         _ = fmt;
-        try writer.print("{{context = {}, dataWords = {}, ptrWords = {}}}", .{ value.context, value.dataWords, value.ptrWords });
+        try writer.print("{{context = {}, dataWords = {}, ptrWords = {}}}", .{ value.context, value.data_words, value.ptr_words });
     }
 };
 
@@ -330,7 +336,7 @@ pub fn ListReader(comptime T: type) type {
         elementSize: u3,
         length: u29,
 
-        pub fn fromReadContext(context: ReadContext) Counter.Error!Self {
+        pub fn fromReadContext(context: ReadContext) Error!Self {
             // for now, ignore the possibility that this may be a far pointer.
             var _context = context;
             switch (try _context.readPtr()) {
@@ -396,7 +402,7 @@ pub fn ListBuilder(comptime T: type) type {
             return Self{ .ptr = ptr, .context = null, .length = 0 };
         }
 
-        pub fn init(self: *Self, length: u29) Allocator.Error!void {
+        pub fn init(self: *Self, length: u29) BuildError!void {
             // Initialize the array.
             std.debug.assert(self.length == 0);
 
@@ -469,7 +475,7 @@ pub fn CompositeListBuilder(comptime T: type) type {
             return Self{ .ptr = ptr, .context = null, .length = 0 };
         }
 
-        pub fn init(self: *Self, length: u29) Allocator.Error!void {
+        pub fn init(self: *Self, length: u29) BuildError!void {
             // Initialize the array.
             std.debug.assert(self.length == 0);
 
@@ -537,7 +543,7 @@ pub fn CompositeListReader(comptime T: type) type {
 
         pub const empty = Self{ .context = null, .elementSize = 0, .length = 0, .dataWords = 0, .ptrWords = 0 };
 
-        pub fn fromReadContext(context: ReadContext) Counter.Error!Self {
+        pub fn fromReadContext(context: ReadContext) Error!Self {
             // for now, ignore the possibility that this may be a far pointer.
             var _context = context;
 
@@ -589,8 +595,8 @@ pub fn CompositeListReader(comptime T: type) type {
             return T.Reader{
                 .reader = StructReader{
                     .context = _context,
-                    .dataWords = self.dataWords,
-                    .ptrWords = self.ptrWords,
+                    .data_words = self.dataWords,
+                    .ptr_words = self.ptrWords,
                 },
             };
         }
@@ -634,7 +640,7 @@ pub const Message = struct {
         allocator.free(self.segments);
     }
 
-    pub fn getRootStruct(self: *Message, comptime T: type) Counter.Error!T.Reader {
+    pub fn getRootStruct(self: *Message, comptime T: type) Error!T.Reader {
         self.traversal_counter = Counter{ .limit = 8 * 1024 * 1024 };
         return T.Reader{ .reader = try StructReader.fromReadContext(ReadContext.fromSegments(self.segments, &self.traversal_counter)) };
     }
@@ -669,9 +675,25 @@ pub const BuildContext = struct {
         self.writeInt(u64, 0, ptr.to_u64());
     }
 
-    pub fn allocStruct(self: *BuildContext, dataWords: u16, ptrWords: u16) Allocator.Error!StructBuilder {
+    pub fn allocStruct(self: *BuildContext, dataWords: u16, ptrWords: u16) BuildError!StructBuilder {
         const builderCtx = try self.builder.alloc(self.segment, ptrWords + dataWords);
-        self.writePtr(Ptr{ .struct_ = .{ .offsetWords = 0, .ptrWords = ptrWords, .dataWords = dataWords } });
+        if (builderCtx.segment != self.segment) {
+            self.writePtr(Ptr{
+                .inter_segment = .{
+                    .double = false,
+                    .offset = builderCtx.offsetWords,
+                    .segment = builderCtx.segment,
+                },
+            });
+        } else {
+            self.writePtr(Ptr{
+                .struct_ = .{
+                    .offsetWords = builderCtx.offsetWords,
+                    .ptrWords = ptrWords,
+                    .dataWords = dataWords,
+                },
+            });
+        }
         return StructBuilder{ .context = builderCtx, .ptrWords = ptrWords, .dataWords = dataWords };
     }
 
@@ -687,30 +709,32 @@ pub const StructMetadata = struct {
 
 pub const MessageBuilder = struct {
     allocator: Allocator = std.heap.page_allocator,
-    allocShift: u5 = 16, // For consistency.
-    segmentStore: [16][]u8 = std.mem.zeroes([16][]u8),
-    segmentShifts: [16]u5 = std.mem.zeroes([16]u5),
+    // exponent for the next segment's size
+    alloc_shift: u5 = 16,
+    segment_store: [16][]u8 = std.mem.zeroes([16][]u8),
+    // capacity exponent per segment
+    segment_shift: [16]u5 = std.mem.zeroes([16]u5),
     segments: [][]u8 = std.mem.zeroes([][]u8),
 
-    pub fn init(self: *MessageBuilder) Allocator.Error!void {
+    pub fn init(self: *MessageBuilder) BuildError!void {
         _ = try self.expandAssert(1);
     }
 
-    inline fn segmentLimit(self: MessageBuilder, segment: u32) u32 {
-        return (@as(u32, 1)) << self.segmentShifts[segment];
+    inline fn segmentCapacity(self: MessageBuilder, segment: u32) u32 {
+        return (@as(u32, 1)) << self.segment_shift[segment];
     }
 
-    pub fn expandAssert(self: *MessageBuilder, min_bytes: u32) Allocator.Error!u32 {
-        const n: u32 = @intCast(self.segments.len);
-        if (n == self.segmentShifts.len) return Allocator.Error.OutOfMemory;
-        const allocShift: u5 = @max(self.allocShift, @as(u5, @intCast(std.math.log2_int_ceil(u32, min_bytes))));
+    pub fn expandAssert(self: *MessageBuilder, min_bytes: u32) BuildError!u32 {
+        const len = self.segments.len;
+        if (len == self.segment_shift.len) return Allocator.Error.OutOfMemory;
+        const allocShift: u5 = @max(self.alloc_shift, @as(u5, @intCast(std.math.log2_int_ceil(u32, min_bytes))));
         const allocBytes: u32 = @as(u32, 1) << allocShift;
-        self.segmentStore[n] = try self.allocator.alloc(u8, allocBytes);
-        self.segmentStore[n].len = 0;
-        self.segmentShifts[n] = allocShift;
-        self.allocShift += 1;
-        self.segments = self.segmentStore[0 .. n + 1];
-        return n;
+        self.segment_store[len] = try self.allocator.alloc(u8, allocBytes);
+        self.segment_store[len].len = 0;
+        self.segment_shift[len] = allocShift;
+        self.alloc_shift += 1;
+        self.segments = self.segment_store[0 .. len + 1];
+        return @as(u32, @intCast(len));
     }
 
     pub fn allocAssert(self: *MessageBuilder, segment: u32, bytes: u32) BuildContext {
@@ -719,10 +743,11 @@ pub const MessageBuilder = struct {
         @memset(seg.ptr[seg.len .. seg.len + bytes], 0);
         return .{ .builder = self, .segments = &self.segments, .segment = segment, .offsetWords = @intCast(seg.len >> 3) };
     }
+
     /// try to allocate in the given segment.
-    pub fn alloc(self: *MessageBuilder, segment: u32, words: u32) Allocator.Error!BuildContext {
+    pub fn alloc(self: *MessageBuilder, segment: u32, words: u32) BuildError!BuildContext {
         const bytes: u32 = words << 3;
-        if (segment < self.segments.len and self.segments[segment].len + bytes < self.segmentLimit(segment)) {
+        if (segment < self.segments.len and self.segments[segment].len + bytes < self.segmentCapacity(segment)) {
             return self.allocAssert(segment, bytes);
         } else {
             var best_ix: u32 = 0;
@@ -731,7 +756,10 @@ pub const MessageBuilder = struct {
             for (self.segments, 0..) |seg, n_| {
                 const n: u32 = @intCast(n_);
                 if (n == segment) continue;
-                const spare: i64 = self.segmentLimit(n) - (@as(u32, @intCast(seg.len)) + bytes);
+
+                const spare: i64 =
+                    @as(i64, @intCast(self.segmentCapacity(n))) -
+                    @as(i64, @intCast(seg.len + bytes));
                 if (spare > best_spare) {
                     best_spare = spare;
                     best_ix = n;
@@ -749,7 +777,7 @@ pub const MessageBuilder = struct {
 
     pub fn deinit(self: *MessageBuilder) void {
         for (self.segments, 0..) |*segment, n| {
-            segment.len = self.segmentLimit(@as(u32, @intCast(n)));
+            segment.len = self.segmentCapacity(@as(u32, @intCast(n)));
             self.allocator.free(segment.*);
         }
     }
@@ -758,8 +786,9 @@ pub const MessageBuilder = struct {
         return Message{ .segments = self.segments };
     }
 
-    pub fn initRootStruct(self: *MessageBuilder, comptime T: type) Allocator.Error!T.Builder {
+    pub fn initRootStruct(self: *MessageBuilder, comptime T: type) BuildError!T.Builder {
         var ctx = try self.alloc(0, 1);
+        std.debug.print("initRootStruct {} {}\n", .{ self.segments.len, self.segment_store[0].len });
         return T.Builder{ .builder = try ctx.allocStruct(T._Metadata.dataWords, T._Metadata.ptrWords) };
     }
 };
@@ -797,4 +826,8 @@ test "test MessageBuilder" {
         try std.testing.expectEqual(@as(u32, 2048), context.offsetWords);
         try std.testing.expectEqual(@as(usize, 8192 * 3), context.segments.*[0].len);
     }
+}
+
+test {
+    _ = @import("capnp_bug_tests.zig");
 }

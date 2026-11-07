@@ -2,5 +2,5 @@
 capnp-tests/*.c++
 capnp-tests/*.h
 capnp-tests/*.bin
-zig-cache
+.zig-cache
 zig-out
