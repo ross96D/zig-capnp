@@ -87,6 +87,7 @@ pub const Error = error{
     SegmentLimitReached,
     RootAlreadyInitialized,
     NotInitialized,
+    AlreadyInitialized,
 };
 
 pub const BuildError = Allocator.Error || Error;
@@ -98,7 +99,7 @@ pub const Counter = struct {
     pub fn increment(self: *Counter, x: u32) Error!void {
         self.count = std.math.add(u32, self.count, x) catch return Error.LimitExceeded;
 
-        if (self.count >= self.limit) {
+        if (self.count > self.limit) {
             return Error.LimitExceeded;
         }
     }
@@ -509,7 +510,7 @@ pub fn ListBuilder(comptime T: type) type {
         ptr: BuildContext,
         context: ?BuildContext,
 
-        elementSize: u3 = switch (T) {
+        element_size: u3 = switch (T) {
             void => 0,
             bool => 1,
             u8, i8 => 2,
@@ -529,27 +530,28 @@ pub fn ListBuilder(comptime T: type) type {
         }
 
         pub fn init(self: *Self, length: u29) BuildError!void {
-            // Initialize the array.
-            std.debug.assert(self.length == 0);
+            if (self.length != 0) return Error.AlreadyInitialized;
 
-            const sizeInWords = switch (self.elementSize) {
+            const element_count: u32 = length;
+            const size_in_words: u32 = switch (self.element_size) {
                 0 => 0,
-                1 => (length + 63) / 64,
-                2 => (length + 7) / 8,
-                3 => (length + 3) / 4,
-                4 => (length + 1) / 2,
-                5 => length,
+                1 => (element_count + 63) / 64,
+                2 => (element_count + 7) / 8,
+                3 => (element_count + 3) / 4,
+                4 => (element_count + 1) / 2,
+                5 => element_count,
                 else => unreachable,
             };
 
-            self.context = try self.ptr.builder.alloc(self.ptr.segment, sizeInWords);
-
-            std.debug.assert(self.context.?.segment == self.ptr.segment);
-            const offsetWords: i30 = @intCast(self.context.?.offset_words - self.ptr.offset_words - 1);
-
+            const object = try self.ptr.builder.allocObject(self.ptr, size_in_words);
+            self.context = object.content;
             self.length = length;
 
-            self.ptr.writePtr(Ptr{ .list = .{ .offset_words = offsetWords, .elements_or_words = length, .element_size = self.elementSize } });
+            try writeObjectPointer(&self.ptr, object, Ptr{ .list = .{
+                .offset_words = 0,
+                .elements_or_words = length,
+                .element_size = self.element_size,
+            } });
         }
 
         pub fn set(self: *Self, index: u32, value: T) void {
@@ -602,29 +604,40 @@ pub fn CompositeListBuilder(comptime T: type) type {
         }
 
         pub fn init(self: *Self, length: u29) BuildError!void {
-            // Initialize the array.
-            std.debug.assert(self.length == 0);
+            if (self.length != 0) return Error.AlreadyInitialized;
 
-            const sizeInWords: u29 = (T._Metadata.ptrWords + T._Metadata.dataWords) * length;
+            const stride = @as(u32, T._Metadata.dataWords) + T._Metadata.ptrWords;
+            const element_words = std.math.mul(u32, stride, length) catch return Error.MessageTooLarge;
+            const payload_words = std.math.add(u32, 1, element_words) catch return Error.MessageTooLarge;
 
-            var structPtr = try self.ptr.builder.alloc(self.ptr.segment, 1 + sizeInWords);
-            self.context = structPtr;
-            self.context.?.offset_words += 1;
+            const object = try self.ptr.builder.allocObject(self.ptr, payload_words);
 
-            structPtr.writePtr(Ptr{ .struct_ = .{ .offset_words = length, .data_words = T._Metadata.dataWords, .ptr_words = T._Metadata.ptrWords } });
+            // The tag word describes the elements and stores their count.
+            var tag = object.content;
+            tag.writePtr(Ptr{ .struct_ = .{
+                .offset_words = @intCast(length),
+                .data_words = T._Metadata.dataWords,
+                .ptr_words = T._Metadata.ptrWords,
+            } });
 
-            std.debug.assert(structPtr.segment == self.ptr.segment);
-            const offsetWords: i30 = @intCast(structPtr.offset_words - self.ptr.offset_words - 1);
-
+            var elements = object.content;
+            elements.offset_words += 1;
+            self.context = elements;
             self.length = length;
 
-            self.ptr.writePtr(Ptr{ .list = .{ .offset_words = offsetWords, .elements_or_words = sizeInWords, .element_size = 7 } });
+            try writeObjectPointer(&self.ptr, object, Ptr{ .list = .{
+                .offset_words = 0,
+                .elements_or_words = @intCast(element_words),
+                .element_size = 7,
+            } });
         }
 
         pub fn get(self: Self, ix: u32) T.Builder {
             std.debug.assert(ix < self.length);
             var _context = self.context.?;
-            _context.relativeWords(@intCast((T._Metadata.ptrWords + T._Metadata.dataWords) * ix));
+            const stride = @as(u64, T._Metadata.dataWords) + T._Metadata.ptrWords;
+            // TODO this need improvement to avoid so much int cast
+            _context.offset_words = @intCast(@as(u64, _context.offset_words) + stride * ix);
 
             return T.Builder{
                 .builder = StructBuilder{
@@ -1007,7 +1020,10 @@ pub const MessageBuilder = struct {
     }
 
     pub fn initRootStruct(self: *MessageBuilder, comptime T: type) BuildError!T.Builder {
-        var ctx = try self.alloc(0, 1);
+        if (self.segments.len != 1 or self.segments[0].len != 0) return Error.RootAlreadyInitialized;
+
+        // The root pointer must be segment 0, word 0.
+        var ctx = self.allocAssert(0, 8);
         return T.Builder{ .builder = try ctx.allocStruct(T._Metadata.dataWords, T._Metadata.ptrWords) };
     }
 };

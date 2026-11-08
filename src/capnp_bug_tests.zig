@@ -444,6 +444,38 @@ test "regression: root struct larger than one segment must round-trip" {
     try testing.expectEqual(@as(u64, 0xdead_beef), reader.getValue());
 }
 
+test "regression: empty lists round-trip at the end of a segment" {
+    {
+        var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
+        try builder.init();
+        defer builder.deinit();
+
+        var holder = try builder.initRootStruct(ByteListHolder);
+        var bytes = holder.getBytes();
+        try bytes.init(0);
+
+        var message = builder.toReader();
+        const reader = try message.getRootStruct(ByteListHolder);
+        const list = try reader.getBytes();
+        try testing.expectEqual(@as(u29, 0), list.length);
+    }
+
+    {
+        var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
+        try builder.init();
+        defer builder.deinit();
+
+        var holder = try builder.initRootStruct(ItemListHolder);
+        var items = holder.getItems();
+        try items.init(0);
+
+        var message = builder.toReader();
+        const reader = try message.getRootStruct(ItemListHolder);
+        const list = try reader.getItems();
+        try testing.expectEqual(@as(u29, 0), list.length);
+    }
+}
+
 test "regression: empty struct is encoded with offset -1" {
     var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
     try builder.init();
