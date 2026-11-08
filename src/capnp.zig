@@ -1167,6 +1167,35 @@ pub const MessageBuilder = struct {
         return Message{ .segments = self.segments };
     }
 
+    pub fn writeTo(self: MessageBuilder, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        const segment_count = self.segments.len;
+        std.debug.assert(segment_count > 0);
+
+        var buf: [4]u8 = undefined;
+        std.mem.writeInt(u32, &buf, @intCast(segment_count - 1), .little);
+        try writer.writeAll(&buf);
+
+        for (self.segments) |segment| {
+            std.debug.assert(segment.len % 8 == 0);
+            std.mem.writeInt(u32, &buf, @intCast(segment.len / 8), .little);
+            try writer.writeAll(&buf);
+        }
+
+        // Pad the segment table to a word boundary.
+        const table_bytes = 4 * (segment_count + 1);
+        var padding = (8 - (table_bytes % 8)) % 8;
+        while (padding > 0) : (padding -= 1) try writer.writeByte(0);
+
+        for (self.segments) |segment| try writer.writeAll(segment);
+    }
+
+    pub fn toBytes(self: MessageBuilder, allocator: std.mem.Allocator) ![]u8 {
+        var output = std.Io.Writer.Allocating.init(allocator);
+        errdefer output.deinit();
+        try self.writeTo(&output.writer);
+        return output.toOwnedSlice();
+    }
+
     pub fn initRootStruct(self: *MessageBuilder, comptime T: type, comptime trait: BuilderTrait(T)) BuildError!T {
         if (self.segments.len != 1 or self.segments[0].len != 0) return Error.RootAlreadyInitialized;
 

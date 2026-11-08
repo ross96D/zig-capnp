@@ -6,6 +6,10 @@ capnp eval -b 04_unions.capnp test1 > 04_unions.bin
 capnp eval -b 05_default_values.capnp test > 05_default_values.bin
 capnp eval -b 07_bits_and_floats.capnp test > 07_bits_and_floats.bin
 
+capnp eval -b 09_codegen_features.capnp test > 09_codegen_features.bin
+capnp eval -b 10_groups.capnp pointTest > 10_groups_point.bin
+capnp eval -b 10_groups.capnp unionTest > 10_groups_union.bin
+
 capnp compile -o - /usr/local/include/capnp/schema.capnp > 06_schema.capnp.original.bin
 capnp convert binary:binary --segment-size=8000000 < 06_schema.capnp.original.bin > 06_schema.capnp.original.1.bin
 

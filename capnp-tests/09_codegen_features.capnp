@@ -17,3 +17,14 @@ struct Features {
   ratio @7 :Float32 = 1.5;
   offset @8 :Int32 = -7;
 }
+
+const test :Features = (
+  name = "hello",
+  blob = 0x"6279746573",
+  color = blue,
+  colors = [red, green, blue],
+  child = (name = "child"),
+  enabled = false,
+  ratio = 3.25,
+  offset = 1234,
+);

@@ -15,3 +15,11 @@ struct WithUnionGroup {
     b @1 :Int32;
   }
 }
+
+const pointTest :WithGroup = (
+  point = (x = 10, y = 20),
+);
+
+const unionTest :WithUnionGroup = (
+  b = 7,
+);

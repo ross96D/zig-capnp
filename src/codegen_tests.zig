@@ -11,81 +11,46 @@ const defaults = codegen.defaults;
 const features = codegen.features;
 const groups = codegen.groups;
 
-fn generateRequest(allocator: std.mem.Allocator, request_path: []const u8) ![]u8 {
-    const bytes = try std.Io.Dir.cwd().readFileAlloc(
+fn expectMessageBytes(builder: *const capnp.MessageBuilder, fixture_path: []const u8) !void {
+    const actual = try builder.toBytes(std.testing.allocator);
+    defer std.testing.allocator.free(actual);
+
+    const expected = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
-        request_path,
-        allocator,
+        fixture_path,
+        std.testing.allocator,
         .limited(64 * 1024 * 1024),
     );
-    defer allocator.free(bytes);
+    defer std.testing.allocator.free(expected);
 
-    var message = try capnp.Message.fromBytes(bytes, allocator);
-    defer message.deinit(allocator);
-
-    const request = try message.getRootStruct(capnpc.schema.CodeGeneratorRequest.Reader, capnpc.schema.CodeGeneratorRequest.reader_trait);
-    const nodes = try request.getNodes();
-
-    var node_map = std.AutoHashMap(u64, capnpc.schema.Node.Reader).init(allocator);
-    defer node_map.deinit();
-    for (0..nodes.length) |i| {
-        const node = nodes.get(@intCast(i));
-        try node_map.put(node.getId(), node);
-    }
-
-    const M = capnpc.Refactor(std.Io.Writer);
-    var output = std.Io.Writer.Allocating.init(allocator);
-    defer output.deinit();
-
-    var import_arena = std.heap.ArenaAllocator.init(allocator);
-    defer import_arena.deinit();
-
-    const files = try request.getRequestedFiles();
-    for (0..files.length) |i| {
-        const requested = files.get(@intCast(i));
-        const imports = try capnpc.collectImports(import_arena.allocator(), requested);
-        var ctx = M.WriteContext{
-            .writer = &output.writer,
-            .indenter = M.Indenter{},
-            .nodes = &node_map,
-            .current_file_id = requested.getId(),
-            .imports = imports,
-        };
-        const requested_file = try ctx.getNodeById(requested.getId());
-        try M.writeNode(&ctx, try requested.getFilename(), requested_file);
-    }
-
-    return output.toOwnedSlice();
+    try std.testing.expectEqualSlices(u8, expected, actual);
 }
 
-const golden_cases = [_]struct {
-    request: []const u8,
-    expected: []const u8,
-}{
-    .{ .request = "capnp-tests/codegen/01_simple_struct.request.bin", .expected = "capnp-tests/codegen-zig/generated_01_simple_struct.zig" },
-    .{ .request = "capnp-tests/codegen/02_simple_lists.request.bin", .expected = "capnp-tests/codegen-zig/generated_02_simple_lists.zig" },
-    .{ .request = "capnp-tests/codegen/03_composite_lists.request.bin", .expected = "capnp-tests/codegen-zig/generated_03_composite_lists.zig" },
-    .{ .request = "capnp-tests/codegen/04_unions.request.bin", .expected = "capnp-tests/codegen-zig/generated_04_unions.zig" },
-    .{ .request = "capnp-tests/codegen/05_default_values.request.bin", .expected = "capnp-tests/codegen-zig/generated_05_default_values.zig" },
-    .{ .request = "capnp-tests/codegen/09_codegen_features.request.bin", .expected = "capnp-tests/codegen-zig/generated_09_codegen_features.zig" },
-    .{ .request = "capnp-tests/codegen/10_groups.request.bin", .expected = "capnp-tests/codegen-zig/generated_10_groups.zig" },
-    .{ .request = "capnp-tests/codegen/11_constants.request.bin", .expected = "capnp-tests/codegen-zig/generated_11_constants.zig" },
-};
+test "generated date bytes match capnp eval" {
+    {
+        var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+        try builder.init();
+        defer builder.deinit();
 
-test "golden generated code" {
-    for (golden_cases) |case| {
-        const generated = try generateRequest(std.testing.allocator, case.request);
-        defer std.testing.allocator.free(generated);
+        var root = try builder.initRootStruct(simple.Date.Builder, simple.Date.builder_trait);
+        root.setYear(2023);
+        root.setMonth(7);
+        root.setDay(14);
 
-        const expected = try std.Io.Dir.cwd().readFileAlloc(
-            std.testing.io,
-            case.expected,
-            std.testing.allocator,
-            .limited(64 * 1024 * 1024),
-        );
-        defer std.testing.allocator.free(expected);
+        try expectMessageBytes(&builder, "capnp-tests/01_simple_struct_date_20230714.bin");
+    }
 
-        try std.testing.expectEqualStrings(expected, generated);
+    {
+        var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+        try builder.init();
+        defer builder.deinit();
+
+        var root = try builder.initRootStruct(simple.Date.Builder, simple.Date.builder_trait);
+        root.setYear(-2023);
+        root.setMonth(7);
+        root.setDay(14);
+
+        try expectMessageBytes(&builder, "capnp-tests/01_simple_struct_datem_20230714.bin");
     }
 }
 
@@ -108,6 +73,8 @@ test "generated primitive list round-trip" {
     var values = try root.u8();
     try values.init(7);
     for (0..7) |i| values.set(@intCast(i), @intCast(i));
+
+    try expectMessageBytes(&builder, "capnp-tests/02_simple_lists.bin");
 
     var message = builder.toReader();
     const reader = try message.getRootStruct(lists.Lists.Reader, lists.Lists.reader_trait);
@@ -135,6 +102,8 @@ test "generated composite list round-trip" {
     second.setMonth(7);
     second.setDay(14);
 
+    try expectMessageBytes(&builder, "capnp-tests/03_composite_lists.bin");
+
     var message = builder.toReader();
     const reader = try message.getRootStruct(composite.Lists.Reader, composite.Lists.reader_trait);
     const got = try reader.dates();
@@ -153,22 +122,24 @@ test "generated union round-trip" {
     try list.init(3);
 
     var first = list.get(0);
-    first.setInt32(77);
+    first.setInt32(0);
 
     var second = list.get(1);
     second.setVoid();
 
     var third = list.get(2);
-    third.setInt32(99);
+    third.setInt32(2);
+
+    try expectMessageBytes(&builder, "capnp-tests/04_unions.bin");
 
     var message = builder.toReader();
     const reader = try message.getRootStruct(unions.UnionTestList.Reader, unions.UnionTestList.reader_trait);
     const got = try reader.unionTests();
     try std.testing.expectEqual(unions.UnionTest.Tag.int32, got.get(0).which());
-    try std.testing.expectEqual(@as(?i32, 77), got.get(0).int32());
+    try std.testing.expectEqual(@as(?i32, 0), got.get(0).int32());
     try std.testing.expectEqual(unions.UnionTest.Tag.void, got.get(1).which());
     try std.testing.expectEqual(@as(?i32, null), got.get(1).int32());
-    try std.testing.expectEqual(@as(?i32, 99), got.get(2).int32());
+    try std.testing.expectEqual(@as(?i32, 2), got.get(2).int32());
 }
 
 test "generated defaults round-trip and fixture" {
@@ -178,6 +149,10 @@ test "generated defaults round-trip and fixture" {
 
     var root = try builder.initRootStruct(defaults.Defaults.Builder, defaults.Defaults.builder_trait);
     try std.testing.expectEqual(@as(i32, 17), root.int32());
+    root.setInt32(17);
+
+    try expectMessageBytes(&builder, "capnp-tests/05_default_values.bin");
+
     root.setInt32(100);
 
     var message = builder.toReader();
@@ -219,6 +194,8 @@ test "generated text, data, enum, list, and defaults round-trip" {
     var child = try root.child();
     try child.setName("child");
 
+    try expectMessageBytes(&builder, "capnp-tests/09_codegen_features.bin");
+
     var message = builder.toReader();
     const reader = try message.getRootStruct(features.Features.Reader, features.Features.reader_trait);
     try std.testing.expectEqualStrings("hello", try reader.name());
@@ -241,6 +218,8 @@ test "generated groups round-trip" {
     point.setX(10);
     point.setY(20);
 
+    try expectMessageBytes(&builder, "capnp-tests/10_groups_point.bin");
+
     var union_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
     try union_builder.init();
     defer union_builder.deinit();
@@ -252,6 +231,8 @@ test "generated groups round-trip" {
     union_root.setB(7);
     try std.testing.expectEqual(groups.WithUnionGroup.Tag.b, union_root.which());
     try std.testing.expect(union_root.a() == null);
+
+    try expectMessageBytes(&union_builder, "capnp-tests/10_groups_union.bin");
 
     var message = builder.toReader();
     const reader = try message.getRootStruct(groups.WithGroup.Reader, groups.WithGroup.reader_trait);
