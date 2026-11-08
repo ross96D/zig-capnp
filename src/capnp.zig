@@ -275,7 +275,7 @@ pub const ReadContext = struct {
         }
     }
 
-    pub fn readString(self: ReadContext, length: u32) Error![]u8 {
+    pub fn readString(self: ReadContext, length: u32) Error![:0]const u8 {
         if (length == 0) return "";
         if (self.segment >= self.segments.len) return Error.InvalidPointer;
 
@@ -285,7 +285,19 @@ pub const ReadContext = struct {
 
         const text = seg[@intCast(start)..][0..length];
         if (text[length - 1] != 0) return Error.InvalidText;
-        return text[0 .. length - 1];
+        return text[0 .. length - 1 :0];
+    }
+
+    /// Read a raw byte blob. Unlike text, data is not NUL-terminated.
+    pub fn readData(self: ReadContext, length: u32) Error![]const u8 {
+        if (length == 0) return "";
+        if (self.segment >= self.segments.len) return Error.InvalidPointer;
+
+        const start: u64 = @as(u64, self.offset_words) * 8;
+        const seg = self.segments[self.segment];
+        if (start + length > seg.len) return Error.OutOfBounds;
+
+        return seg[@intCast(start)..][0..length];
     }
 
     pub fn fromSegments(segments: [][]u8, traversal_counter: *Counter) ReadContext {
@@ -355,8 +367,12 @@ pub const StructReader = struct {
 
     pub fn readVoid(_: StructReader) void {}
 
-    pub fn readStringField(self: StructReader, ptrNo: u16) Error![]u8 {
+    pub fn readStringField(self: StructReader, ptrNo: u16) Error![:0]const u8 {
         return (try self.readPtrField(ListReader(u8), ptrNo)).getString();
+    }
+
+    pub fn readDataField(self: StructReader, ptrNo: u16) Error![]const u8 {
+        return (try self.readPtrField(ListReader(u8), ptrNo)).getData();
     }
 
     pub fn readFloatField(self: StructReader, comptime T: type, offset: u32) T {
@@ -516,9 +532,14 @@ pub fn ListReader(comptime T: type) type {
             return self.context.readInt(T, ix);
         }
 
-        pub fn getString(self: Self) Error![]u8 {
+        pub fn getString(self: Self) Error![:0]const u8 {
             comptime std.debug.assert(T == u8);
             return self.context.readString(self.length);
+        }
+
+        pub fn getData(self: Self) Error![]const u8 {
+            comptime std.debug.assert(T == u8);
+            return self.context.readData(self.length);
         }
     };
 }
@@ -784,28 +805,27 @@ pub const Message = struct {
     segments: [][]u8 = undefined,
     traversal_counter: Counter = Counter{ .limit = 8 * 1024 * 1024 },
 
-    pub fn fromFile(file: std.fs.File, allocator: std.mem.Allocator) !Message {
+    pub fn fromFile(file: std.Io.File, io: std.Io, allocator: std.mem.Allocator) !Message {
         var buffer: [4]u8 = undefined;
 
-        std.debug.assert(4 == try file.read(buffer[0..4]));
+        std.debug.assert(4 == try file.readPositionalAll(io, &buffer, 0));
 
         const segmentCount = 1 + std.mem.readInt(u32, buffer[0..4], .little);
 
-        // std.debug.print("segmentCount = {}\n", .{segmentCount});
-
         var segmentLengthsBuffer = try allocator.alloc(u8, 4 * segmentCount * BYTES);
         defer allocator.free(segmentLengthsBuffer);
-        std.debug.assert(segmentLengthsBuffer.len == try file.read(segmentLengthsBuffer));
+
+        var offset: u64 = 4;
+        std.debug.assert(segmentLengthsBuffer.len == try file.readPositionalAll(io, segmentLengthsBuffer, offset));
+        offset += segmentLengthsBuffer.len;
 
         const segments = try allocator.alloc([]u8, segmentCount * ELEMENTS);
 
         for (0..segmentCount) |i| {
             const segmentWords = std.mem.readInt(u32, segmentLengthsBuffer[i * 4 ..][0..4], .little);
             segments[i] = try allocator.alloc(u8, segmentWords * 8 * BYTES);
-            std.debug.assert(segments[i].len == try file.read(segments[i]));
-        }
-        if (segmentCount & 1 == 0) {
-            try file.seekBy(4);
+            std.debug.assert(segments[i].len == try file.readPositionalAll(io, segments[i], offset));
+            offset += segments[i].len;
         }
         return Message{ .segments = segments };
     }
