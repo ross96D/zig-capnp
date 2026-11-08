@@ -398,6 +398,14 @@ test "BUG: alloc spare-space computation must not underflow" {
     try testing.expectEqual(before + 1, builder.segments.len);
 }
 
+test "regression: alloc rejects word counts larger than a segment" {
+    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
+    try builder.init();
+    defer builder.deinit();
+
+    try expectAnyError(builder.alloc(0, std.math.maxInt(u32)));
+}
+
 test "BUG: root struct larger than one segment must round-trip" {
     var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
     try builder.init();

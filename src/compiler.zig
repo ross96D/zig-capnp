@@ -738,7 +738,7 @@ pub fn Transformer(comptime WriterType: type) type {
 // Just using one file for now. We will add this back in later
 const PathTable = struct {
     const PathMap = std.AutoHashMap(u64, []const u8);
-    const Error = std.fmt.BufPrintError || Allocator.Error || capnp.Counter.Error;
+    const Error = std.fmt.BufPrintError || Allocator.Error || capnp.Error;
     pathMap: PathMap,
     nodeIdMap: NodeIdMap,
     allocator: Allocator,

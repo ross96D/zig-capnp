@@ -242,12 +242,12 @@ pub const ReadContext = struct {
                 .list => |l| {
                     const words: u32 = switch (l.element_size) {
                         0 => 0,
-                        1 => (l.elements_or_words + 63) / 64,
-                        2 => (l.elements_or_words + 7) / 8,
-                        3 => (l.elements_or_words + 3) / 4,
-                        4 => (l.elements_or_words + 1) / 2,
+                        1 => (std.math.add(u32, l.elements_or_words, 63) catch unreachable) / 64,
+                        2 => (std.math.add(u32, l.elements_or_words, 7) catch unreachable) / 8,
+                        3 => (std.math.add(u32, l.elements_or_words, 3) catch unreachable) / 4,
+                        4 => (std.math.add(u32, l.elements_or_words, 1) catch unreachable) / 2,
                         5, 6 => l.elements_or_words,
-                        7 => 1 + l.elements_or_words,
+                        7 => std.math.add(u32, 1, l.elements_or_words) catch unreachable,
                     };
                     const word = try self.checkObject(content_segment, content_word_offset, words);
 
@@ -837,13 +837,14 @@ pub const StructMetadata = struct {
     dataWords: u16,
 };
 
+const max_segment_bytes: u32 = (1 << 32) - 8;
+
 pub const MessageBuilder = struct {
     allocator: Allocator = std.heap.page_allocator,
-    // exponent for the next segment's size
-    alloc_shift: u5 = 16,
+    // Capacity for the next new segment. Grows geometrically, capped at max_segment_bytes.
+    next_segment_bytes: u32 = 1 << 16,
     segment_store: [16][]u8 = std.mem.zeroes([16][]u8),
-    // capacity exponent per segment
-    segment_shift: [16]u5 = std.mem.zeroes([16]u5),
+    segment_capacity: [16]u32 = std.mem.zeroes([16]u32),
     segments: [][]u8 = std.mem.zeroes([][]u8),
 
     pub fn init(self: *MessageBuilder) BuildError!void {
@@ -851,23 +852,33 @@ pub const MessageBuilder = struct {
     }
 
     inline fn segmentCapacity(self: MessageBuilder, segment: u32) u32 {
-        return (@as(u32, 1)) << self.segment_shift[segment];
+        return self.segment_capacity[segment];
     }
 
     pub fn expandAssert(self: *MessageBuilder, min_bytes: u32) BuildError!u32 {
-        const len = self.segments.len;
-        if (len == self.segment_shift.len) return Allocator.Error.OutOfMemory;
-        const allocShift: u5 = @max(self.alloc_shift, @as(u5, @intCast(std.math.log2_int_ceil(u32, min_bytes))));
-        const allocBytes: u32 = @as(u32, 1) << allocShift;
-        self.segment_store[len] = try self.allocator.alloc(u8, allocBytes);
+        const len: u32 = @intCast(self.segments.len);
+        if (len == self.segment_capacity.len) return Error.SegmentLimitReached;
+        if (min_bytes > max_segment_bytes) return Error.MessageTooLarge;
+
+        var capacity: u32 = self.next_segment_bytes;
+        if (capacity < min_bytes) {
+            capacity = std.math.ceilPowerOfTwo(u32, min_bytes) catch max_segment_bytes;
+        }
+        if (capacity > max_segment_bytes) capacity = max_segment_bytes;
+        if (capacity < min_bytes) return Error.MessageTooLarge;
+
+        self.segment_store[len] = try self.allocator.alloc(u8, capacity);
         self.segment_store[len].len = 0;
-        self.segment_shift[len] = allocShift;
-        self.alloc_shift += 1;
+        self.segment_capacity[len] = capacity;
+        self.next_segment_bytes = @min(capacity * 2, max_segment_bytes);
         self.segments = self.segment_store[0 .. len + 1];
-        return @as(u32, @intCast(len));
+        return len;
     }
 
     pub fn allocAssert(self: *MessageBuilder, segment: u32, bytes: u32) BuildContext {
+        std.debug.assert(segment < self.segments.len);
+        std.debug.assert(@as(u64, self.segments[segment].len) + bytes <= self.segmentCapacity(segment));
+
         defer self.segments[segment].len += bytes;
         const seg = self.segments[segment];
         @memset(seg.ptr[seg.len .. seg.len + bytes], 0);
@@ -876,33 +887,38 @@ pub const MessageBuilder = struct {
 
     /// try to allocate in the given segment.
     pub fn alloc(self: *MessageBuilder, segment: u32, words: u32) BuildError!BuildContext {
-        const bytes: u32 = words << 3;
-        if (segment < self.segments.len and self.segments[segment].len + bytes < self.segmentCapacity(segment)) {
-            return self.allocAssert(segment, bytes);
-        } else {
-            var best_ix: u32 = 0;
-            var best_spare: i64 = -1;
+        const bytes: u32 = std.math.mul(u32, words, 8) catch return Error.MessageTooLarge;
+        if (bytes > max_segment_bytes) return Error.MessageTooLarge;
 
-            for (self.segments, 0..) |seg, n_| {
-                const n: u32 = @intCast(n_);
-                if (n == segment) continue;
-
-                const spare: i64 =
-                    @as(i64, @intCast(self.segmentCapacity(n))) -
-                    @as(i64, @intCast(seg.len + bytes));
-                if (spare > best_spare) {
-                    best_spare = spare;
-                    best_ix = n;
-                }
-            }
-
-            if (best_spare < 0) {
-                const seg = try self.expandAssert(bytes);
-                return self.allocAssert(seg, bytes);
-            } else {
-                return self.allocAssert(best_ix, bytes);
+        if (segment < self.segments.len) {
+            const used: u64 = self.segments[segment].len;
+            if (used + bytes <= self.segmentCapacity(segment)) {
+                return self.allocAssert(segment, bytes);
             }
         }
+
+        var best_ix: u32 = 0;
+        var best_spare: i64 = -1;
+
+        for (self.segments, 0..) |seg, n_| {
+            const n: u32 = @intCast(n_);
+            if (n == segment) continue;
+
+            const spare: i64 =
+                @as(i64, self.segmentCapacity(n)) -
+                @as(i64, @intCast(seg.len + bytes));
+            if (spare > best_spare) {
+                best_spare = spare;
+                best_ix = n;
+            }
+        }
+
+        if (best_spare < 0) {
+            const new_segment = try self.expandAssert(bytes);
+            return self.allocAssert(new_segment, bytes);
+        }
+
+        return self.allocAssert(best_ix, bytes);
     }
 
     pub fn deinit(self: *MessageBuilder) void {

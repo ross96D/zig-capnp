@@ -107,7 +107,7 @@ pub const Lists = struct {
     pub const Reader = struct {
         reader: capnp.Struct.Reader,
 
-        pub fn getU8(self: Reader) capnp.Counter.Error!capnp.List(u8).Reader {
+        pub fn getU8(self: Reader) capnp.Error!capnp.List(u8).Reader {
             return self.reader.readPtrField(capnp.List(u8).Reader, 0);
         }
     };
@@ -129,7 +129,7 @@ pub const CompositeLists = struct {
     pub const Reader = struct {
         reader: capnp.Struct.Reader,
 
-        pub fn getDates(self: Reader) capnp.Counter.Error!capnp.List(Date).Reader {
+        pub fn getDates(self: Reader) capnp.Error!capnp.List(Date).Reader {
             return self.reader.readPtrField(capnp.List(Date).Reader, 0);
         }
     };
@@ -285,7 +285,7 @@ pub const ULists = struct {
     pub const Reader = struct {
         reader: capnp.Struct.Reader,
 
-        pub fn getUnionTests(self: Reader) capnp.Counter.Error!capnp.CompositeListReader(UnionTest) {
+        pub fn getUnionTests(self: Reader) capnp.Error!capnp.CompositeListReader(UnionTest) {
             return self.reader.readPtrField(capnp.CompositeListReader(UnionTest), 0);
         }
     };
