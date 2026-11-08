@@ -553,7 +553,7 @@ pub fn ListBuilder(comptime T: type) type {
             if (self.length != 0) return Error.AlreadyInitialized;
 
             const element_count: u32 = length;
-            const size_in_words: u32 = switch (self.element_size) {
+            const size_in_words: u32 = switch (element_size) {
                 0 => 0,
                 1 => (element_count + 63) / 64,
                 2 => (element_count + 7) / 8,
@@ -570,7 +570,7 @@ pub fn ListBuilder(comptime T: type) type {
             try writeObjectPointer(&self.ptr, object, Ptr{ .list = .{
                 .offset_words = 0,
                 .elements_or_words = length,
-                .element_size = self.element_size,
+                .element_size = element_size,
             } });
         }
 
