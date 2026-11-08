@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
-        .root_source_file = b.path("src/compiler.zig"),
+        .root_source_file = b.path("src/refactor.zig"),
     });
 
     const compiler_exe = b.addExecutable(.{
@@ -62,9 +62,20 @@ pub fn build(b: *std.Build) void {
 
     const run_main_tests = b.addRunArtifact(main_tests);
 
+    const compiler_tests = b.addTest(.{
+        .root_module = compiler_mod,
+        .test_runner = .{
+            .mode = .simple,
+            .path = b.path("test_runner.zig"),
+        },
+    });
+
+    const run_compiler_tests = b.addRunArtifact(compiler_tests);
+
     // This creates a build step. It will be visible in the `zig build --help` menu,
     // and can be selected like this: `zig build test`
     // This will evaluate the `test` step rather than the default, which is "install".
-    const test_step = b.step("test", "Run library tests");
+    const test_step = b.step("test", "Run library and codegen tests");
     test_step.dependOn(&run_main_tests.step);
+    test_step.dependOn(&run_compiler_tests.step);
 }

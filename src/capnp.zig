@@ -825,6 +825,36 @@ pub const Message = struct {
         return Message{ .segments = segments };
     }
 
+    pub fn fromBytes(bytes: []const u8, allocator: std.mem.Allocator) !Message {
+        if (bytes.len < 4) return Error.OutOfBounds;
+
+        const segment_count: usize = 1 + std.mem.readInt(u32, bytes[0..4], .little);
+        const table_bytes = std.math.mul(usize, 4, segment_count) catch return Error.MessageTooLarge;
+        const data_offset = std.mem.alignForward(usize, 4 + table_bytes, 8);
+        if (data_offset > bytes.len) return Error.OutOfBounds;
+
+        const segments = try allocator.alloc([]u8, segment_count);
+        var initialized: usize = 0;
+        errdefer {
+            for (segments[0..initialized]) |segment| allocator.free(segment);
+            allocator.free(segments);
+        }
+
+        var offset = data_offset;
+        for (0..segment_count) |i| {
+            const words = std.mem.readInt(u32, bytes[4 + i * 4 ..][0..4], .little);
+            const byte_len = std.math.mul(usize, words, 8) catch return Error.MessageTooLarge;
+            if (offset + byte_len > bytes.len) return Error.OutOfBounds;
+
+            segments[i] = try allocator.alloc(u8, byte_len);
+            initialized += 1;
+            @memcpy(segments[i], bytes[offset..][0..byte_len]);
+            offset += byte_len;
+        }
+
+        return Message{ .segments = segments };
+    }
+
     pub fn deinit(self: *Message, allocator: std.mem.Allocator) void {
         for (self.segments) |segment| {
             allocator.free(segment);

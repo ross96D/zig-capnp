@@ -8,8 +8,8 @@ fn Wrapper(comptime T: type, comptime F: anytype) type {
     return struct {
         value: T,
 
-        pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-            try F(self.value, writer);
+        pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            F(self.value, writer) catch return error.WriteFailed;
         }
     };
 }
@@ -79,13 +79,13 @@ fn writeReplaceKeyword(name: []const u8, writer: anytype) !void {
 pub fn Refactor(comptime W: type) type {
     return struct {
         const WriterType = W;
-        const E = W.Error || capnp.Error;
+        const E = W.Error || capnp.Error || error{NodeNotFound};
         const Self = @This();
 
         const Indenter = struct {
             level: usize = 0,
 
-            pub fn write(self: Indenter, writer: W) E!void {
+            pub fn write(self: Indenter, writer: *W) E!void {
                 for (0..self.level) |_| {
                     try writer.writeAll("    ");
                 }
@@ -107,21 +107,20 @@ pub fn Refactor(comptime W: type) type {
             with_error: bool,
         };
 
-        fn typedFn(ctx: TypedContext, writer: anytype) @TypeOf(writer).Error!void {
-            const out = writeType(ctx.ctx, ctx.typ, ctx.gt, ctx.with_error, false);
-
-            return out catch |err| switch (err) {
-                error.LimitExceeded => {
-                    return void{};
-                },
-                else => |e| {
-                    return e;
-                },
-            };
+        fn typedFn(ctx: TypedContext, writer: anytype) E!void {
+            _ = writer;
+            return writeType(ctx.ctx, ctx.typ, ctx.gt, ctx.with_error, false);
         }
 
         fn typed(value: TypedContext) Wrapper(TypedContext, typedFn) {
             return .{ .value = value };
+        }
+
+        fn printArg(writer: *W, value: anytype) E!void {
+            switch (@typeInfo(@TypeOf(value))) {
+                .@"struct" => try writer.print("{f}", .{value}),
+                else => try writer.print("{s}", .{value}),
+            }
         }
 
         // Idea: Create type combinators
@@ -131,59 +130,52 @@ pub fn Refactor(comptime W: type) type {
 
         //pub fn (comptime T: type, comptime T2: type) type {}
 
+        pub const NodeMap = std.AutoHashMap(u64, schema.Node.Reader);
+
         pub const WriteContext = struct {
-            writer: W,
+            writer: *W,
             indenter: Indenter,
-            nodes: capnp.CompositeListReader(schema.Node) = capnp.CompositeListReader(schema.Node).empty,
+            nodes: *const NodeMap,
 
-            pub fn getNodeById(self: *WriteContext, id: u64) schema.Node.Reader {
-                // Scan through looking for nodes. This is O(N), but could be O(1) if a problem.
-                for (0..self.nodes.length) |i| {
-                    const node = self.nodes.get(@intCast(i));
-                    if (node.getId() == id) {
-                        return node;
-                    }
-                } else {
-                    std.debug.print("Node {} not found\n", .{id});
-                    @panic("getNodeById: Node not found");
-                }
-                // We panic if the node is not present. After all, what else can we do?
-
+            pub fn getNodeById(self: *WriteContext, id: u64) E!schema.Node.Reader {
+                return self.nodes.get(id) orelse error.NodeNotFound;
             }
 
-            fn writeNodeNameById(self: *WriteContext, id: u64) !void {
-                try self.writeNodeName(self.getNodeById(id));
+            fn writeNodeNameById(self: *WriteContext, id: u64) E!void {
+                try self.writeNodeName(try self.getNodeById(id));
             }
 
-            fn writeNodeName(self: *WriteContext, node: schema.Node.Reader) !void {
+            fn writeNodeName(self: *WriteContext, node: schema.Node.Reader) E!void {
                 // cppFullName first checks scopeID isn’t zero,
 
                 var current_node = node;
-                var ancestors = std.BoundedArray(u64, 64).init(0) catch @panic("writeNodeName: imposible");
+                var ancestors: [64]u64 = undefined;
+                var ancestors_len: usize = 0;
 
-                ancestors.appendAssumeCapacity(current_node.getId());
+                ancestors[ancestors_len] = current_node.getId();
+                ancestors_len += 1;
                 var scope_id = current_node.getScopeId();
 
-                //  We need to do this in the main
-
-                // Get all ancestors
+                // Get all ancestors.
                 while (scope_id != 0) {
-                    ancestors.append(scope_id) catch @panic("writeNodeName: stack overflow");
-                    current_node = self.getNodeById(scope_id);
+                    if (ancestors_len == ancestors.len) @panic("writeNodeName: stack overflow");
+                    ancestors[ancestors_len] = scope_id;
+                    ancestors_len += 1;
+                    current_node = try self.getNodeById(scope_id);
                     scope_id = current_node.getScopeId();
                 }
 
                 // ASSUME This works because files should always be the outermost scope.
                 if (current_node.which() == .file) {
-                    // try self.writer.print("{s}", .{try node.getDisplayName()});
                     try self.writer.writeAll("_Root");
                 }
 
-                // todo check if file and give sane error message etc
-                //
-                _ = ancestors.pop();
+                // Drop the root from the list; walk from its child down to the node.
+                ancestors_len -= 1;
 
-                while (ancestors.popOrNull()) |child_node_id| {
+                while (ancestors_len > 0) {
+                    ancestors_len -= 1;
+                    const child_node_id = ancestors[ancestors_len];
                     var is_field = false;
                     const parent_nested_nodes = try current_node.getNestedNodes();
                     const scope_name: []const u8 = result: for (0..parent_nested_nodes.length) |i| {
@@ -212,7 +204,7 @@ pub fn Refactor(comptime W: type) type {
                     } else {
                         try self.writer.writeAll(scope_name);
                     }
-                    current_node = self.getNodeById(child_node_id);
+                    current_node = try self.getNodeById(child_node_id);
                 }
             }
 
@@ -230,17 +222,21 @@ pub fn Refactor(comptime W: type) type {
                 switch (field.which()) {
                     .slot => {
                         const typ = try field.getSlot().?.getType();
-                        try ctx.writer.print("pub fn get{}(self: @This()) ", .{capitalized(name)});
+                        try ctx.writer.writeAll("pub fn ");
+                        try writeReplaceKeyword(name, ctx.writer);
+                        try ctx.writer.writeAll("(self: @This()) ");
                         try writeType(ctx, typ, tgt, true, field.getDiscriminantValue() != 0xffff);
                         try ctx.writer.writeAll(" {\n");
                     },
                     .group => {
-                        try ctx.writer.print("pub fn get{}(self: @This()) ", .{capitalized(name)});
+                        try ctx.writer.writeAll("pub fn ");
+                        try writeReplaceKeyword(name, ctx.writer);
+                        try ctx.writer.writeAll("(self: @This()) ");
                         if (field.getDiscriminantValue() != 0xffff) {
                             try ctx.writer.writeAll("?");
                         }
                         try ctx.writeNodeNameById(field.getGroup().?.getTypeId());
-                        try ctx.writer.print(".{s}", .{capitalized(gt.toString())});
+                        try ctx.writer.print(".{f}", .{capitalized(gt.toString())});
                         try ctx.writer.writeAll(" {\n");
                     },
                     else => {},
@@ -248,15 +244,17 @@ pub fn Refactor(comptime W: type) type {
                 ctx.indenter.inc();
             }
 
-            pub fn openSetter(ctx: *WriteContext, name: []const u8, typ: anytype, rtyp: anytype) E!void {
+            pub fn openSetter(ctx: *WriteContext, name: []const u8, typ: anytype, rtyp: []const u8) E!void {
                 try ctx.writeIndent();
-                try ctx.writer.print("pub fn set{s}(self: @This(), value: {s}) {s} {{\n", .{ capitalized(name), typ, rtyp });
+                try ctx.writer.print("pub fn set{f}(self: @This(), value: ", .{capitalized(name)});
+                try printArg(ctx.writer, typ);
+                try ctx.writer.print(") {s} {{\n", .{rtyp});
                 ctx.indenter.inc();
             }
 
             pub fn openVoidSetter(ctx: *WriteContext, name: []const u8) E!void {
                 try ctx.writeIndent();
-                try ctx.writer.print("pub fn set{s}(self: @This()) void {{\n", .{capitalized(name)});
+                try ctx.writer.print("pub fn set{f}(self: @This()) void {{\n", .{capitalized(name)});
                 ctx.indenter.inc();
             }
 
@@ -317,8 +315,9 @@ pub fn Refactor(comptime W: type) type {
                     });
                     return;
                 },
-                .interface => undefined,
+                .interface => "capnp.AnyPointer",
                 .anyPointer => "capnp.AnyPointer",
+                else => "capnp.AnyPointer",
             };
             try ctx.writer.writeAll(out);
         }
@@ -333,7 +332,7 @@ pub fn Refactor(comptime W: type) type {
                     const nested_nodes = try node.getNestedNodes();
                     for (0..nested_nodes.length) |i| {
                         const nested_node = nested_nodes.get(@intCast(i));
-                        try writeNode(ctx, try nested_node.getName(), ctx.getNodeById(nested_node.getId()));
+                        try writeNode(ctx, try nested_node.getName(), try ctx.getNodeById(nested_node.getId()));
                     }
                 },
 
@@ -397,7 +396,7 @@ pub fn Refactor(comptime W: type) type {
                             if (field.getDiscriminantValue() == 0xffff) continue;
                             if (field.which() != .group) continue;
 
-                            try writeNode(ctx, try field.getName(), ctx.getNodeById(field.getGroup().?.getTypeId()));
+                            try writeNode(ctx, try field.getName(), try ctx.getNodeById(field.getGroup().?.getTypeId()));
                             // try ctx.writeIndent();
                             // try writeReplaceKeyword(try field.getName(), ctx.writer);
                             // try ctx.writer.print(" = {},\n", .{field.getDiscriminantValue()});
@@ -440,7 +439,7 @@ pub fn Refactor(comptime W: type) type {
                     const nested_nodes = try node.getNestedNodes();
                     for (0..nested_nodes.length) |i| {
                         const nested_node = nested_nodes.get(@intCast(i));
-                        try writeNode(ctx, try nested_node.getName(), ctx.getNodeById(nested_node.getId()));
+                        try writeNode(ctx, try nested_node.getName(), try ctx.getNodeById(nested_node.getId()));
                     }
 
                     ctx.indenter.dec();
@@ -550,7 +549,7 @@ pub fn Refactor(comptime W: type) type {
                         },
                         .list => {
                             try ctx.writer.print(
-                                "return self.{s}.readListField({}, {d});\n",
+                                "return self.{s}.readListField({f}, {d});\n",
                                 .{
                                     gt.toString(),
                                     typed(.{ .typ = try (try field.getSlot().?.getType()).getList().?.getElementType(), .ctx = ctx, .gt = switch (gt) {
@@ -673,7 +672,7 @@ pub fn Refactor(comptime W: type) type {
                             const elementType = try t.getList().?.getElementType();
                             try ctx.openSetter(try field.getName(), typed(.{ .ctx = ctx, .gt = .reader_getter, .typ = t, .with_error = false }), "capnp.Error!void");
                             try ctx.writeIndent();
-                            try ctx.writer.print("return self.builder.setListField({}, {d}, value);\n", .{ typed(.{ .ctx = ctx, .gt = .base, .typ = elementType, .with_error = false }), slot.getOffset() });
+                            try ctx.writer.print("return self.builder.setListField({f}, {d}, value);\n", .{ typed(.{ .ctx = ctx, .gt = .base, .typ = elementType, .with_error = false }), slot.getOffset() });
                             try ctx.closeSetter();
                         },
 
@@ -681,7 +680,7 @@ pub fn Refactor(comptime W: type) type {
                             try ctx.openSetter(try field.getName(), typed(.{ .ctx = ctx, .gt = .reader_getter, .typ = t, .with_error = false }), "capnp.Error!void");
                             try ctx.writeIndent();
 
-                            try ctx.writer.print("return self.builder.setStructField({}, {d}, value);\n", .{ typed(.{ .ctx = ctx, .gt = .base, .typ = t, .with_error = false }), slot.getOffset() });
+                            try ctx.writer.print("return self.builder.setStructField({f}, {d}, value);\n", .{ typed(.{ .ctx = ctx, .gt = .base, .typ = t, .with_error = false }), slot.getOffset() });
                             try ctx.closeSetter();
                         },
 
@@ -711,124 +710,184 @@ pub fn Refactor(comptime W: type) type {
 }
 
 test "simple" {
-    var buf: [128]u8 = std.mem.zeroes([128]u8);
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
-
+    var buf: [128]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buf);
     const M = Refactor(@TypeOf(writer));
 
-    var file = try std.fs.cwd().openFile("capnp-tests/08-schema-examples.void.bin", .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().openFile(std.testing.io, "capnp-tests/08-schema-examples.void.bin", .{});
+    defer file.close(std.testing.io);
 
-    var message = try capnp.Message.fromFile(file, std.testing.allocator);
+    var message = try capnp.Message.fromFile(file, std.testing.io, std.testing.allocator);
     defer message.deinit(std.testing.allocator);
 
+    var nodes = M.NodeMap.init(std.testing.allocator);
+    defer nodes.deinit();
+
     var ctx = M.WriteContext{
-        .writer = writer,
+        .writer = &writer,
         .indenter = M.Indenter{},
+        .nodes = &nodes,
     };
 
-    const reader = try message.getRootStruct(schema.Type);
-
+    const reader = try message.getRootStruct(schema.Type.Reader, schema.Type.reader_trait);
     try M.writeType(&ctx, reader, .reader_getter, true, false);
 
-    try std.testing.expectEqualStrings("void", fbs.getWritten());
+    try std.testing.expectEqualStrings("void", writer.buffered());
 }
 
 test "writeReaderGetterReturnType" {
-    var buf: [128]u8 = std.mem.zeroes([128]u8);
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
-
+    var buf: [128]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buf);
     const M = Refactor(@TypeOf(writer));
 
-    var file = try std.fs.cwd().openFile("capnp-tests/08-schema-examples.node.bin", .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().openFile(std.testing.io, "capnp-tests/08-schema-examples.node.bin", .{});
+    defer file.close(std.testing.io);
 
-    var message = try capnp.Message.fromFile(file, std.testing.allocator);
+    var message = try capnp.Message.fromFile(file, std.testing.io, std.testing.allocator);
     defer message.deinit(std.testing.allocator);
 
+    var nodes = M.NodeMap.init(std.testing.allocator);
+    defer nodes.deinit();
+
     var ctx = M.WriteContext{
-        .writer = writer,
+        .writer = &writer,
         .indenter = M.Indenter{},
+        .nodes = &nodes,
     };
 
-    const reader = try message.getRootStruct(schema.Node);
+    const reader = try message.getRootStruct(schema.Node.Reader, schema.Node.reader_trait);
     const fields = try reader.getStruct().?.getFields();
 
-    fbs.reset();
+    writer.end = 0;
     try M.writeType(&ctx, try fields.get(0).getSlot().?.getType(), .reader_getter, true, false);
-    try std.testing.expectEqualStrings("void", fbs.getWritten());
+    try std.testing.expectEqualStrings("void", writer.buffered());
 
-    fbs.reset();
+    writer.end = 0;
     try M.writeType(&ctx, try fields.get(1).getSlot().?.getType(), .reader_getter, true, false);
-    try std.testing.expectEqualStrings("bool", fbs.getWritten());
+    try std.testing.expectEqualStrings("bool", writer.buffered());
 }
 
 test "field" {
-    var buf: [128]u8 = std.mem.zeroes([128]u8);
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
-
+    var buf: [128]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buf);
     const M = Refactor(@TypeOf(writer));
 
-    var file = try std.fs.cwd().openFile("capnp-tests/08-schema-examples.field1.bin", .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().openFile(std.testing.io, "capnp-tests/08-schema-examples.node.bin", .{});
+    defer file.close(std.testing.io);
 
-    var message = try capnp.Message.fromFile(file, std.testing.allocator);
+    var message = try capnp.Message.fromFile(file, std.testing.io, std.testing.allocator);
     defer message.deinit(std.testing.allocator);
 
+    var nodes = M.NodeMap.init(std.testing.allocator);
+    defer nodes.deinit();
+
     var ctx = M.WriteContext{
-        .writer = writer,
+        .writer = &writer,
         .indenter = M.Indenter{},
+        .nodes = &nodes,
     };
 
-    const reader = try message.getRootStruct(schema.Field);
-    try M.writeType(&ctx, try reader.getSlot().?.getType(), .reader_getter, true, false);
+    const reader = try message.getRootStruct(schema.Node.Reader, schema.Node.reader_trait);
+    const struct_reader = reader.getStruct().?;
+    const field = (try struct_reader.getFields()).get(2);
 
-    // try std.testing.expectEqualStrings("i32", fbs.getWritten());
-
-    fbs.reset();
-    try M.writeGetter(&ctx, 0, reader, .reader);
-    try std.testing.expectEqualStrings("pub fn get(self: @This()) i32 {\n    return self.reader.readIntField(i32, 3);\n}", fbs.getWritten());
+    writer.end = 0;
+    try M.writeGetter(&ctx, struct_reader.getDiscriminantOffset(), field, .reader);
+    try std.testing.expectEqualStrings("pub fn int32(self: @This()) i32 {\n    return self.reader.readIntField(i32, 0);\n}", writer.buffered());
 }
 
 test "compiler" {
-    // var buf = std.mem.zeroes([65 * 1024]u8);
-    // var fbs = std.io.fixedBufferStream(&buf);
-    // const writer = fbs.writer();
-    // const writer = std.io.getStdOut().writer();
-    //
-    const outf = try std.fs.cwd().createFile("/dev/shm/testoutput.zig", .{});
-    const writer = outf.writer();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "capnp-tests/06_schema.capnp.original.1.bin",
+        std.testing.allocator,
+        .limited(64 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(bytes);
 
-    const M = Refactor(@TypeOf(writer));
-
-    var file = try std.fs.cwd().openFile("capnp-tests/06_schema.capnp.original.1.bin", .{});
-    defer file.close();
-
-    var message = try capnp.Message.fromFile(file, std.testing.allocator);
+    var message = try capnp.Message.fromBytes(bytes, std.testing.allocator);
     defer message.deinit(std.testing.allocator);
 
-    const request = try message.getRootStruct(schema.CodeGeneratorRequest);
-
+    const request = try message.getRootStruct(schema.CodeGeneratorRequest.Reader, schema.CodeGeneratorRequest.reader_trait);
     const nodes = try request.getNodes();
 
+    var node_map = std.AutoHashMap(u64, schema.Node.Reader).init(std.testing.allocator);
+    defer node_map.deinit();
+    for (0..nodes.length) |i| {
+        const node = nodes.get(@intCast(i));
+        try node_map.put(node.getId(), node);
+    }
+
+    const M = Refactor(std.Io.Writer);
+
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
     var ctx = M.WriteContext{
-        .writer = writer,
+        .writer = &output.writer,
         .indenter = M.Indenter{},
-        .nodes = nodes,
+        .nodes = &node_map,
     };
 
     const files = try request.getRequestedFiles();
-    const requested_file = ctx.getNodeById(files.get(@intCast(0)).getId());
+    const requested_file = try ctx.getNodeById(files.get(0).getId());
+    try M.writeNode(&ctx, try files.get(0).getFilename(), requested_file);
 
-    std.debug.print("file_id = {x}\n", .{requested_file.getId()});
+    const code = try output.toOwnedSlice();
+    defer std.testing.allocator.free(code);
 
-    // for (0..nodes.length) |i| {
-    //     const node = nodes.get(@intCast(i));
-    //     try ctx.writeNodeName(node);
-    //     try ctx.writer.writeAll("\n");
-    // }
-    try M.writeNode(&ctx, "", requested_file);
+    try std.testing.expect(code.len > 0);
+    try std.testing.expect(std.mem.startsWith(u8, code, "// "));
+    try std.testing.expect(std.mem.indexOf(u8, code, "pub const") != null);
+}
+
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const arena = init.arena.allocator();
+
+    var stdin_buf: [4096]u8 = undefined;
+    var stdin_reader = std.Io.File.stdin().reader(init.io, &stdin_buf);
+    const bytes = try stdin_reader.interface.allocRemaining(allocator, .limited(256 * 1024 * 1024));
+    defer allocator.free(bytes);
+
+    var message = try capnp.Message.fromBytes(bytes, arena);
+    defer message.deinit(arena);
+
+    const request = try message.getRootStruct(schema.CodeGeneratorRequest.Reader, schema.CodeGeneratorRequest.reader_trait);
+
+    var node_map = std.AutoHashMap(u64, schema.Node.Reader).init(allocator);
+    defer node_map.deinit();
+
+    const nodes = try request.getNodes();
+    for (0..nodes.length) |i| {
+        const node = nodes.get(@intCast(i));
+        try node_map.put(node.getId(), node);
+    }
+
+    const M = Refactor(std.Io.Writer);
+
+    var out_buf: [4096]u8 = undefined;
+    var out_writer = std.Io.File.stdout().writer(init.io, &out_buf);
+
+    const files = try request.getRequestedFiles();
+    for (0..files.length) |i| {
+        const requested = files.get(@intCast(i));
+
+        var output = std.Io.Writer.Allocating.init(allocator);
+        defer output.deinit();
+
+        var ctx = M.WriteContext{
+            .writer = &output.writer,
+            .indenter = M.Indenter{},
+            .nodes = &node_map,
+        };
+
+        const requested_file = try ctx.getNodeById(requested.getId());
+        try M.writeNode(&ctx, try requested.getFilename(), requested_file);
+
+        const code = try output.toOwnedSlice();
+        defer allocator.free(code);
+        try out_writer.interface.writeAll(code);
+    }
+    try out_writer.interface.flush();
 }
