@@ -52,15 +52,28 @@ const type_context = enum {
     builder_getter,
 };
 
-const keywords: [3][]const u8 = .{ "struct", "enum", "const" };
+const keywords = [_][]const u8{
+    "addrspace",    "align",     "allowzero",   "and",         "anyframe",
+    "anytype",      "asm",       "async",       "await",       "break",
+    "callconv",     "catch",     "comptime",    "const",       "continue",
+    "defer",        "else",      "enum",        "errdefer",    "error",
+    "export",       "extern",    "false",       "fn",          "for",
+    "if",           "inline",    "linksection", "noalias",     "noinline",
+    "nosuspend",    "null",      "opaque",      "or",          "orelse",
+    "packed",       "pub",       "resume",      "return",      "struct",
+    "suspend",      "switch",    "test",        "threadlocal", "true",
+    "try",          "undefined", "union",       "unpacked",    "usingnamespace",
+    "var",          "volatile",  "while",       "anyerror",    "comptime_float",
+    "comptime_int", "f16",       "f32",         "f64",         "f80",
+    "f128",         "i8",        "i16",         "i32",         "i64",
+    "i128",         "isize",     "noreturn",    "type",        "u8",
+    "u16",          "u32",       "u64",         "u128",        "usize",
+    "void",         "bool",
+};
 
 fn isKeyword(name: []const u8) bool {
-    const hashed = std.hash.Wyhash.hash(0, name);
     for (keywords) |keyword| {
-        if (std.hash.Wyhash.hash(0, keyword) == hashed) {
-            if (std.mem.eql(u8, keyword, name))
-                return true;
-        }
+        if (std.mem.eql(u8, keyword, name)) return true;
     }
     return false;
 }
@@ -271,11 +284,33 @@ pub fn Refactor(comptime W: type) type {
             return name[0..1] ++ name[n..];
         }
 
+        fn writeListType(ctx: *WriteContext, element: schema.Type.Reader, gt: type_context) E!void {
+            if (element.which() == .struct_) {
+                const id = element.getStruct().?.getTypeId();
+                const builder = gt == .builder_getter;
+                try ctx.writer.writeAll(if (builder) "capnp.CompositeListBuilder(" else "capnp.CompositeListReader(");
+                try ctx.writeNodeNameById(id);
+                try ctx.writer.writeAll(if (builder) ".Builder, " else ".Reader, ");
+                try ctx.writeNodeNameById(id);
+                try ctx.writer.writeAll(if (builder) ".builder_trait)" else ".reader_trait)");
+                return;
+            }
+
+            try ctx.writer.writeAll("capnp.List(");
+            try writeType(ctx, element, .base, false, false);
+            try ctx.writer.writeAll(")");
+            try ctx.writer.writeAll(switch (gt) {
+                .base => "",
+                .reader_getter => ".Reader",
+                .builder_getter => ".Builder",
+            });
+        }
+
         pub fn writeType(ctx: *WriteContext, reader: schema.Type.Reader, gt: type_context, with_error: bool, is_optional: bool) E!void {
             if (with_error) {
                 switch (reader.which()) {
-                    .list, .data, .text, .struct_ => {
-                        try ctx.writer.writeAll("capnp.Error!");
+                    .list, .data, .text, .struct_, .anyPointer, .interface => {
+                        try ctx.writer.writeAll(if (gt == .builder_getter) "capnp.BuildError!" else "capnp.Error!");
                     },
                     else => {},
                 }
@@ -283,29 +318,16 @@ pub fn Refactor(comptime W: type) type {
             if (is_optional) {
                 try ctx.writer.writeAll("?");
             }
-            const out = switch (reader.which()) {
-                .void => "void",
-                .bool => "bool",
-                inline .int8, .int16, .int32, .int64 => |x| zigNameHelper(@tagName(x), 3),
-                inline .uint8, .uint16, .uint32, .uint64 => |x| zigNameHelper(@tagName(x), 4),
-                inline .float32, .float64 => |x| zigNameHelper(@tagName(x), 5),
-                .text => "[:0]const u8",
-                .data => "[]const u8",
-                .list => {
-                    try ctx.writer.writeAll("capnp.List(");
-                    try writeType(ctx, try reader.getList().?.getElementType(), .base, false, false);
-                    try ctx.writer.writeAll(")");
-                    try ctx.writer.writeAll(switch (gt) {
-                        .base => "",
-                        .reader_getter => ".Reader",
-                        .builder_getter => ".Builder",
-                    });
-                    return;
-                },
-                .enum_ => {
-                    try ctx.writeNodeNameById(reader.getEnum().?.getTypeId());
-                    return;
-                },
+            switch (reader.which()) {
+                .void => try ctx.writer.writeAll("void"),
+                .bool => try ctx.writer.writeAll("bool"),
+                inline .int8, .int16, .int32, .int64 => |x| try ctx.writer.writeAll(zigNameHelper(@tagName(x), 3)),
+                inline .uint8, .uint16, .uint32, .uint64 => |x| try ctx.writer.writeAll(zigNameHelper(@tagName(x), 4)),
+                inline .float32, .float64 => |x| try ctx.writer.writeAll(zigNameHelper(@tagName(x), 5)),
+                .text => try ctx.writer.writeAll("[:0]const u8"),
+                .data => try ctx.writer.writeAll("[]const u8"),
+                .list => try writeListType(ctx, try reader.getList().?.getElementType(), gt),
+                .enum_ => try ctx.writeNodeNameById(reader.getEnum().?.getTypeId()),
                 .struct_ => {
                     try ctx.writeNodeNameById(reader.getStruct().?.getTypeId());
                     try ctx.writer.writeAll(switch (gt) {
@@ -313,13 +335,10 @@ pub fn Refactor(comptime W: type) type {
                         .reader_getter => ".Reader",
                         .builder_getter => ".Builder",
                     });
-                    return;
                 },
-                .interface => "capnp.AnyPointer",
-                .anyPointer => "capnp.AnyPointer",
-                else => "capnp.AnyPointer",
-            };
-            try ctx.writer.writeAll(out);
+                .interface, .anyPointer => try ctx.writer.writeAll("capnp.AnyPointerReader"),
+                else => try ctx.writer.writeAll("capnp.AnyPointerReader"),
+            }
         }
 
         pub fn writeNode(ctx: *WriteContext, name: []const u8, node: schema.Node.Reader) E!void {
@@ -338,18 +357,23 @@ pub fn Refactor(comptime W: type) type {
 
                 .@"enum" => {
                     try ctx.writeIndent();
-                    try ctx.writer.print("const {s} = enum(u16) {{\n", .{name});
+                    try ctx.writer.writeAll("pub const ");
+                    try writeReplaceKeyword(name, ctx.writer);
+                    try ctx.writer.writeAll(" = enum(u16) {\n");
                     ctx.indenter.inc();
 
                     const enumerants = try node.getEnum().?.getEnumerants();
                     for (0..enumerants.length) |i| {
                         const enumerant = enumerants.get(@intCast(i));
                         try ctx.writeIndent();
-                        try ctx.writer.print("{s} = {d},\n", .{ try enumerant.getName(), i });
+                        try writeReplaceKeyword(try enumerant.getName(), ctx.writer);
+                        try ctx.writer.print(" = {d},\n", .{i});
                     }
-
                     try ctx.writeIndent();
+                    try ctx.writer.writeAll("_,\n");
+
                     ctx.indenter.dec();
+                    try ctx.writeIndent();
                     try ctx.writer.writeAll("};\n");
                 },
 
@@ -370,9 +394,10 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writeIndent();
                     try ctx.writer.print("pub const id: u64 = 0x{x};\n\n", .{node.getId()});
 
-                    const fields = try node.getStruct().?.getFields();
+                    const struct_ = node.getStruct().?;
+                    const fields = try struct_.getFields();
 
-                    if (node.getStruct().?.getDiscriminantCount() > 0) {
+                    if (struct_.getDiscriminantCount() > 0) {
                         try ctx.writeIndent();
                         try ctx.writer.writeAll("pub const Tag = enum(u16) {\n");
                         ctx.indenter.inc();
@@ -410,7 +435,34 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("reader: capnp.StructReader,\n\n");
 
-                    if (node.getStruct().?.getDiscriminantCount() > 0) {
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub fn fromStructReader(reader: capnp.StructReader) @This() {\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("return .{ .reader = reader };\n");
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("}\n\n");
+
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("return fromStructReader(try capnp.StructReader.fromReadContext(context));\n");
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("}\n\n");
+
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub fn fromNull(context: capnp.ReadContext) @This() {\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("return fromStructReader(capnp.StructReader.fromNull(context));\n");
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("}\n\n");
+
+                    if (struct_.getDiscriminantCount() > 0) {
                         try ctx.writeIndent();
                         try ctx.writer.writeAll("pub fn which(self: @This()) ");
                         try ctx.writeNodeName(node);
@@ -418,7 +470,7 @@ pub fn Refactor(comptime W: type) type {
                         ctx.indenter.inc();
 
                         try ctx.writeIndent();
-                        try ctx.writer.print("return @enumFromInt(self.reader.readIntField(u16, {d}));\n", .{node.getStruct().?.getDiscriminantOffset()});
+                        try ctx.writer.print("return @fromBackingInt(@intCast(self.reader.readIntField(u16, {d})));\n", .{struct_.getDiscriminantOffset()});
 
                         ctx.indenter.dec();
                         try ctx.writeIndent();
@@ -428,7 +480,7 @@ pub fn Refactor(comptime W: type) type {
                     for (0..fields.length) |i| {
                         try writeGetter(
                             ctx,
-                            node.getStruct().?.getDiscriminantOffset(),
+                            struct_.getDiscriminantOffset(),
                             fields.get(@intCast(i)),
                             .reader,
                         );
@@ -447,16 +499,34 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writer.writeAll("};\n\n");
 
                     try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub const reader_trait = capnp.ReaderTrait(Reader){\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll(".reader = Reader.fromStructReader,\n");
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("};\n\n");
+
+                    try ctx.writeIndent();
                     try ctx.writer.writeAll("pub const Builder = struct {\n");
                     ctx.indenter.inc();
 
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("builder: capnp.StructBuilder,\n\n");
 
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("return .{ .builder = builder };\n");
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("}\n\n");
+
                     for (0..fields.length) |i| {
                         try writeGetter(
                             ctx,
-                            node.getStruct().?.getDiscriminantOffset(),
+                            struct_.getDiscriminantOffset(),
                             fields.get(@intCast(i)),
                             .builder,
                         );
@@ -465,6 +535,19 @@ pub fn Refactor(comptime W: type) type {
                         try ctx.writer.writeAll("\n\n");
                     }
 
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("};\n\n");
+
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub const builder_trait = capnp.BuilderTrait(Builder){\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.print(".data_words = {d},\n", .{struct_.getDataWordCount()});
+                    try ctx.writeIndent();
+                    try ctx.writer.print(".ptr_words = {d},\n", .{struct_.getPointerCount()});
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll(".builder = Builder.fromStructBuilder,\n");
                     ctx.indenter.dec();
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("};\n\n");
@@ -498,9 +581,7 @@ pub fn Refactor(comptime W: type) type {
 
                     switch (t.which()) {
                         .void => {
-                            {
-                                try ctx.writer.writeAll("return self.reader.readVoid();\n");
-                            }
+                            try ctx.writer.print("return self.{s}.readVoid();\n", .{target});
                         },
                         .bool => {
                             try ctx.writer.print("return self.{s}.readBoolField({d});\n", .{ target, slot.getOffset() });
@@ -548,34 +629,32 @@ pub fn Refactor(comptime W: type) type {
                             );
                         },
                         .list => {
-                            try ctx.writer.print(
-                                "return self.{s}.readListField({f}, {d});\n",
-                                .{
-                                    gt.toString(),
-                                    typed(.{ .typ = try (try field.getSlot().?.getType()).getList().?.getElementType(), .ctx = ctx, .gt = switch (gt) {
-                                        .reader => .reader_getter,
-                                        .builder => .builder_getter,
-                                    }, .with_error = false }),
-                                    field.getSlot().?.getOffset(),
-                                },
-                            );
+                            const method = if (gt == .builder) "buildPtrField" else "readPtrField";
+                            try ctx.writer.print("return self.{s}.{s}(", .{ target, method });
+                            try writeType(ctx, t, if (gt == .builder) .builder_getter else .reader_getter, false, false);
+                            try ctx.writer.print(", {d});\n", .{slot.getOffset()});
                         },
                         .struct_ => {
-                            try ctx.writer.writeAll("return self.reader.readStructField(");
-                            try ctx.writeNodeNameById((try field.getSlot().?.getType()).getStruct().?.getTypeId());
-                            try ctx.writer.print(", {d});\n", .{field.getSlot().?.getOffset()});
-                        },
-                        .anyPointer => {
-                            switch (gt) {
-                                .reader => try ctx.writer.print("return self.reader.readAnyPointer({});\n", .{field.getSlot().?.getOffset()}),
-                                .builder => try ctx.writer.print("return self.builder.writeAnyPointer({});\n", .{field.getSlot().?.getOffset()}),
+                            const id = t.getStruct().?.getTypeId();
+                            if (gt == .builder) {
+                                try ctx.writer.writeAll("return self.builder.buildStructField(");
+                                try ctx.writeNodeNameById(id);
+                                try ctx.writer.writeAll(".Builder, ");
+                                try ctx.writeNodeNameById(id);
+                                try ctx.writer.writeAll(".builder_trait, ");
+                                try ctx.writer.print("{d});\n", .{slot.getOffset()});
+                            } else {
+                                try ctx.writer.writeAll("return self.reader.readPtrField(");
+                                try ctx.writeNodeNameById(id);
+                                try ctx.writer.writeAll(".Reader, ");
+                                try ctx.writer.print("{d});\n", .{slot.getOffset()});
                             }
+                        },
+                        .anyPointer, .interface => {
+                            try ctx.writer.print("return self.{s}.readPtrField(capnp.AnyPointerReader, {d});\n", .{ target, slot.getOffset() });
                         },
                         .enum_ => {
-                            switch (gt) {
-                                .reader => try ctx.writer.print("return @enumFromInt(self.reader.readIntField(u16, {}));\n", .{field.getSlot().?.getOffset()}),
-                                .builder => try ctx.writer.print("return @enumFromInt(self.builder.readIntField(u16, {}));\n", .{field.getSlot().?.getOffset()}),
-                            }
+                            try ctx.writer.print("return @fromBackingInt(@intCast(self.{s}.readIntField(u16, {d})));\n", .{ target, slot.getOffset() });
                         },
                         else => {},
                     }
@@ -616,7 +695,7 @@ pub fn Refactor(comptime W: type) type {
                         .bool => {
                             try ctx.openSetter(try field.getName(), "bool", "void");
                             try ctx.writeIndent();
-                            try ctx.writer.print("self.builder.setBoolField({d}, value);\n", .{slot.getOffset()});
+                            try ctx.writer.print("self.builder.writeBoolField({d}, value);\n", .{slot.getOffset()});
                             try ctx.closeSetter();
                         },
 
@@ -628,7 +707,7 @@ pub fn Refactor(comptime W: type) type {
                             try ctx.writeIndent();
 
                             try ctx.writer.print(
-                                "self.builder.setIntField({s}, {d}, value);\n",
+                                "self.builder.writeIntField({s}, {d}, value);\n",
                                 .{
                                     zigTypeName,
                                     slot.getOffset(),
@@ -645,7 +724,7 @@ pub fn Refactor(comptime W: type) type {
                             try ctx.writeIndent();
 
                             try ctx.writer.print(
-                                "self.builder.setFloatField({s}, {d}, value);\n",
+                                "self.builder.writeFloatField({s}, {d}, value);\n",
                                 .{
                                     zigTypeName,
                                     slot.getOffset(),
@@ -655,39 +734,23 @@ pub fn Refactor(comptime W: type) type {
                         },
 
                         .text => {
-                            try ctx.openSetter(try field.getName(), "[:0]const u8", "capnp.Error!void");
+                            try ctx.openSetter(try field.getName(), "[:0]const u8", "capnp.BuildError!void");
                             try ctx.writeIndent();
-                            try ctx.writer.print("try self.builder.setTextField({d}, value);\n", .{slot.getOffset()});
+                            try ctx.writer.print("try self.builder.writeStringField({d}, value);\n", .{slot.getOffset()});
                             try ctx.closeSetter();
                         },
 
                         .data => {
-                            try ctx.openSetter(try field.getName(), "[]const u8", "capnp.Error!void");
+                            try ctx.openSetter(try field.getName(), "[]const u8", "capnp.BuildError!void");
                             try ctx.writeIndent();
-                            try ctx.writer.print("try self.builder.setDataField({d}, value);\n", .{slot.getOffset()});
+                            try ctx.writer.print("try self.builder.writeDataField({d}, value);\n", .{slot.getOffset()});
                             try ctx.closeSetter();
                         },
 
-                        .list => {
-                            const elementType = try t.getList().?.getElementType();
-                            try ctx.openSetter(try field.getName(), typed(.{ .ctx = ctx, .gt = .reader_getter, .typ = t, .with_error = false }), "capnp.Error!void");
+                        .enum_ => {
+                            try ctx.openSetter(try field.getName(), typed(.{ .ctx = ctx, .gt = .base, .typ = t, .with_error = false }), "void");
                             try ctx.writeIndent();
-                            try ctx.writer.print("return self.builder.setListField({f}, {d}, value);\n", .{ typed(.{ .ctx = ctx, .gt = .base, .typ = elementType, .with_error = false }), slot.getOffset() });
-                            try ctx.closeSetter();
-                        },
-
-                        .struct_ => {
-                            try ctx.openSetter(try field.getName(), typed(.{ .ctx = ctx, .gt = .reader_getter, .typ = t, .with_error = false }), "capnp.Error!void");
-                            try ctx.writeIndent();
-
-                            try ctx.writer.print("return self.builder.setStructField({f}, {d}, value);\n", .{ typed(.{ .ctx = ctx, .gt = .base, .typ = t, .with_error = false }), slot.getOffset() });
-                            try ctx.closeSetter();
-                        },
-
-                        .anyPointer => {
-                            try ctx.openSetter(try field.getName(), "capnp.AnyPointerReader", "capnp.Error!void");
-                            try ctx.writeIndent();
-                            try ctx.writer.print("return self.builder.setAnyPointerField({d}, value);", .{field.getSlot().?.getOffset()});
+                            try ctx.writer.print("self.builder.writeIntField(u16, {d}, @intCast(@backingInt(value)));\n", .{slot.getOffset()});
                             try ctx.closeSetter();
                         },
 

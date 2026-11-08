@@ -432,6 +432,54 @@ pub const StructBuilder = struct {
         return T.fromBuildContext(ptr);
     }
 
+    pub fn buildStructField(
+        self: StructBuilder,
+        comptime T: type,
+        comptime trait: BuilderTrait(T),
+        ptr_no: u16,
+    ) BuildError!T {
+        std.debug.assert(ptr_no < self.ptr_words);
+        var ptr = self.context;
+        ptr.relativeWords(self.data_words + ptr_no);
+        return trait.builder(try ptr.allocStruct(trait.data_words, trait.ptr_words));
+    }
+
+    pub fn readPtrField(self: StructBuilder, comptime T: type, ptr_no: u16) Error!T {
+        var counter = Counter{ .limit = 8 * 1024 * 1024 };
+        const reader = StructReader{
+            .context = .{
+                .segments = self.context.segments.*,
+                .segment = self.context.segment,
+                .offset_words = self.context.offset_words,
+                .traversal_counter = &counter,
+            },
+            .data_words = self.data_words,
+            .ptr_words = self.ptr_words,
+        };
+        return reader.readPtrField(T, ptr_no);
+    }
+
+    pub fn readStringField(self: StructBuilder, ptr_no: u16) Error![:0]const u8 {
+        return (try self.readPtrField(ListReader(u8), ptr_no)).getString();
+    }
+
+    pub fn readDataField(self: StructBuilder, ptr_no: u16) Error![]const u8 {
+        return (try self.readPtrField(ListReader(u8), ptr_no)).getData();
+    }
+
+    pub fn writeStringField(self: StructBuilder, ptr_no: u16, value: [:0]const u8) BuildError!void {
+        var list = self.buildPtrField(ListBuilder(u8), ptr_no);
+        try list.init(@intCast(value.len + 1));
+        for (value, 0..) |byte, i| list.set(@intCast(i), byte);
+        list.set(@intCast(value.len), 0);
+    }
+
+    pub fn writeDataField(self: StructBuilder, ptr_no: u16, value: []const u8) BuildError!void {
+        var list = self.buildPtrField(ListBuilder(u8), ptr_no);
+        try list.init(@intCast(value.len));
+        for (value, 0..) |byte, i| list.set(@intCast(i), byte);
+    }
+
     pub fn readFloatField(self: StructBuilder, comptime T: type, offset: u32) T {
         const U = comptime switch (T) {
             f32 => u32,
@@ -494,6 +542,49 @@ pub const Struct = struct {
     pub const Reader = StructReader;
 };
 
+fn listElementSize(comptime T: type) u3 {
+    return switch (T) {
+        void => 0,
+        bool => 1,
+        u8, i8 => 2,
+        u16, i16 => 3,
+        u32, i32, f32 => 4,
+        u64, i64, f64 => 5,
+        else => switch (@typeInfo(T)) {
+            .@"enum" => 3,
+            else => @compileError("unsupported list element type"),
+        },
+    };
+}
+
+fn listGet(comptime T: type, context: ReadContext, ix: u32) T {
+    if (T == bool) {
+        const bucket = ix / 8;
+        const shift: u3 = @intCast(ix % 8);
+        return ((context.readInt(u8, bucket) >> shift) & 1) != 0;
+    }
+    if (@typeInfo(T) == .@"enum") {
+        return @fromBackingInt(@intCast(context.readInt(u16, ix)));
+    }
+    return context.readInt(T, ix);
+}
+
+fn listSet(comptime T: type, context: BuildContext, ix: u32, value: T) void {
+    if (T == bool) {
+        const bucket = ix / 8;
+        const shift: u3 = @intCast(ix % 8);
+        const mask: u8 = @as(u8, 1) << shift;
+        const old = context.readInt(u8, bucket);
+        context.writeInt(u8, bucket, ~mask & old | if (value) mask else 0);
+        return;
+    }
+    if (@typeInfo(T) == .@"enum") {
+        context.writeInt(u16, ix, @intCast(@backingInt(value)));
+        return;
+    }
+    context.writeInt(T, ix, value);
+}
+
 pub fn ListReader(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -508,16 +599,7 @@ pub fn ListReader(comptime T: type) type {
             switch (try _context.readPtr()) {
                 .null => return Self.fromNull(context),
                 .list => |list| {
-                    const expected_element_size: u3 = switch (T) {
-                        void => 0,
-                        bool => 1,
-                        u8, i8 => 2,
-                        u16, i16 => 3,
-                        u32, i32, f32 => 4,
-                        u64, i64, f64 => 5,
-                        else => @compileError("unsupported list element type"),
-                    };
-                    if (list.element_size != expected_element_size) return Error.TypeMismatch;
+                    if (list.element_size != listElementSize(T)) return Error.TypeMismatch;
 
                     return Self{
                         .context = _context,
@@ -534,7 +616,7 @@ pub fn ListReader(comptime T: type) type {
         }
 
         pub fn get(self: Self, ix: u32) T {
-            return self.context.readInt(T, ix);
+            return listGet(T, self.context, ix);
         }
 
         pub fn getString(self: Self) Error![:0]const u8 {
@@ -552,15 +634,7 @@ pub fn ListReader(comptime T: type) type {
 pub fn ListBuilder(comptime T: type) type {
     return struct {
         const Self = @This();
-        const element_size: u3 = switch (T) {
-            void => 0,
-            bool => 1,
-            u8, i8 => 2,
-            u16, i16 => 3,
-            u32, i32, f32 => 4,
-            u64, i64, f64 => 5,
-            else => unreachable,
-        };
+        const element_size: u3 = listElementSize(T);
 
         ptr: BuildContext,
         context: ?BuildContext,
@@ -603,12 +677,12 @@ pub fn ListBuilder(comptime T: type) type {
         pub fn set(self: *Self, index: u32, value: T) void {
             std.debug.assert(self.context != null);
             std.debug.assert(index < self.length);
-            self.context.?.writeInt(T, index, value);
+            listSet(T, self.context.?, index, value);
         }
 
         pub fn get(self: Self, ix: u32) T {
             std.debug.assert(ix < self.length);
-            return self.context.?.readInt(T, ix);
+            return listGet(T, self.context.?, ix);
         }
     };
 }
