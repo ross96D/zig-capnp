@@ -390,6 +390,10 @@ pub const Node = struct {
             return if (self.which() == Tag.@"enum") .{ .reader = self.reader } else null;
         }
 
+        pub fn getConst(self: @This()) ?const_.Reader {
+            return if (self.which() == Tag.@"const") .{ .reader = self.reader } else null;
+        }
+
         pub fn getDisplayName(self: @This()) capnp.Error![:0]const u8 {
             return try self.reader.readStringField(0);
         }

@@ -107,7 +107,7 @@ pub const Counter = struct {
 };
 
 pub const ReadContext = struct {
-    segments: [][]u8,
+    segments: []const []const u8,
     segment: u32,
     offset_words: u29,
 
@@ -300,7 +300,7 @@ pub const ReadContext = struct {
         return seg[@intCast(start)..][0..length];
     }
 
-    pub fn fromSegments(segments: [][]u8, traversal_counter: *Counter) ReadContext {
+    pub fn fromSegments(segments: []const []const u8, traversal_counter: *Counter) ReadContext {
         return ReadContext{
             .segments = segments,
             .segment = 0,
@@ -1196,6 +1196,121 @@ pub const MessageBuilder = struct {
         return output.toOwnedSlice();
     }
 
+    fn listWordCount(element_size: u3, count: u29) BuildError!u32 {
+        return switch (element_size) {
+            0 => 0,
+            1 => (std.math.add(u32, count, 63) catch return Error.MessageTooLarge) / 64,
+            2 => (std.math.add(u32, count, 7) catch return Error.MessageTooLarge) / 8,
+            3 => (std.math.add(u32, count, 3) catch return Error.MessageTooLarge) / 4,
+            4 => (std.math.add(u32, count, 1) catch return Error.MessageTooLarge) / 2,
+            5, 6 => count,
+            7 => unreachable,
+        };
+    }
+
+    fn copyStructBody(
+        self: *MessageBuilder,
+        source: ReadContext,
+        dest: BuildContext,
+        data_words: u16,
+        ptr_words: u16,
+    ) BuildError!void {
+        for (0..data_words) |i| {
+            dest.writeInt(u64, @intCast(i), source.readInt(u64, @intCast(i)));
+        }
+        for (0..ptr_words) |i| {
+            var src = source;
+            src.offset_words += data_words + @as(u29, @intCast(i));
+            const ptr = try src.readPtr();
+            var dst = dest;
+            dst.offset_words += data_words + @as(u29, @intCast(i));
+            try self.copyPointerTo(&dst, .{ .context = src, .ptr = ptr });
+        }
+    }
+
+    fn copyListTo(self: *MessageBuilder, dest: *BuildContext, source: ReadContext, list: Ptr.List) BuildError!void {
+        if (list.element_size == 7) {
+            const tag_raw = source.readInt(u64, 0);
+            const tag = Ptr.of_u64(tag_raw);
+            const struct_tag = switch (tag) {
+                .struct_ => |s| s,
+                else => return Error.InvalidPointer,
+            };
+            const element_count: u32 = @intCast(struct_tag.offset_words);
+            const stride: u32 = @as(u32, struct_tag.data_words) + struct_tag.ptr_words;
+            const payload_words = std.math.add(u32, 1, list.elements_or_words) catch return Error.MessageTooLarge;
+
+            const object = try self.allocObject(dest.*, payload_words);
+            try writeObjectPointer(dest, object, Ptr{ .list = .{
+                .offset_words = 0,
+                .elements_or_words = list.elements_or_words,
+                .element_size = 7,
+            } });
+            object.content.writeInt(u64, 0, tag_raw);
+
+            for (0..element_count) |i| {
+                var src = source;
+                src.offset_words += 1 + @as(u29, @intCast(i)) * @as(u29, @intCast(stride));
+                var dst = object.content;
+                dst.offset_words += 1 + @as(u29, @intCast(i)) * @as(u29, @intCast(stride));
+                try self.copyStructBody(src, dst, struct_tag.data_words, struct_tag.ptr_words);
+            }
+            return;
+        }
+
+        const words = try listWordCount(list.element_size, list.elements_or_words);
+        const object = try self.allocObject(dest.*, words);
+        try writeObjectPointer(dest, object, Ptr{ .list = .{
+            .offset_words = 0,
+            .elements_or_words = list.elements_or_words,
+            .element_size = list.element_size,
+        } });
+
+        if (list.element_size == 6) {
+            for (0..list.elements_or_words) |i| {
+                var src = source;
+                src.offset_words += @intCast(i);
+                const ptr = try src.readPtr();
+                var dst = object.content;
+                dst.offset_words += @intCast(i);
+                try self.copyPointerTo(&dst, .{ .context = src, .ptr = ptr });
+            }
+        } else {
+            for (0..words) |i| {
+                object.content.writeInt(u64, @intCast(i), source.readInt(u64, @intCast(i)));
+            }
+        }
+    }
+
+    pub fn copyPointerTo(self: *MessageBuilder, dest: *BuildContext, source: AnyPointerReader) BuildError!void {
+        switch (source.ptr) {
+            .null => dest.writePtr(.null),
+            .capability => return Error.TypeMismatch,
+            .struct_ => |struct_| {
+                const words = @as(u32, struct_.data_words) + struct_.ptr_words;
+                if (words == 0) {
+                    _ = try dest.allocStruct(0, 0);
+                    return;
+                }
+                const object = try self.allocObject(dest.*, words);
+                try writeObjectPointer(dest, object, Ptr{ .struct_ = .{
+                    .offset_words = 0,
+                    .data_words = struct_.data_words,
+                    .ptr_words = struct_.ptr_words,
+                } });
+                try self.copyStructBody(source.context, object.content, struct_.data_words, struct_.ptr_words);
+            },
+            .list => |list| try self.copyListTo(dest, source.context, list),
+            .inter_segment => return Error.InvalidPointer,
+        }
+    }
+
+    pub fn initFromAnyPointer(self: *MessageBuilder, source: AnyPointerReader) BuildError!void {
+        if (self.segments.len != 1 or self.segments[0].len != 0) return Error.RootAlreadyInitialized;
+        var root = self.allocAssert(0, 8);
+        try self.copyPointerTo(&root, source);
+    }
+
     pub fn initRootStruct(self: *MessageBuilder, comptime T: type, comptime trait: BuilderTrait(T)) BuildError!T {
         if (self.segments.len != 1 or self.segments[0].len != 0) return Error.RootAlreadyInitialized;
 
@@ -1204,6 +1319,13 @@ pub const MessageBuilder = struct {
         return trait.builder(try ctx.allocStruct(trait.data_words, trait.ptr_words));
     }
 };
+
+threadlocal var static_traversal_counter: Counter = .{ .limit = std.math.maxInt(u32) };
+
+pub fn getStaticRoot(comptime T: type, segments: []const []const u8) Error!T {
+    static_traversal_counter = .{ .limit = std.math.maxInt(u32) };
+    return T.fromReadContext(ReadContext.fromSegments(segments, &static_traversal_counter));
+}
 
 test "test MessageBuilder" {
     var builder = MessageBuilder{ .allocator = std.testing.allocator };

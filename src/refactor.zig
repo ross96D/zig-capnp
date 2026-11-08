@@ -158,7 +158,7 @@ pub fn collectImports(
 pub fn Refactor(comptime W: type) type {
     return struct {
         const WriterType = W;
-        const E = W.Error || capnp.Error || error{ NodeNotFound, UnknownImport };
+        const E = W.Error || capnp.Error || std.mem.Allocator.Error || error{ NodeNotFound, UnknownImport };
         const Self = @This();
 
         pub const Indenter = struct {
@@ -215,6 +215,7 @@ pub fn Refactor(comptime W: type) type {
             writer: *W,
             indenter: Indenter,
             nodes: *const NodeMap,
+            allocator: std.mem.Allocator = std.heap.page_allocator,
             current_file_id: u64 = 0,
             imports: []const ImportAlias = &.{},
 
@@ -462,7 +463,57 @@ pub fn Refactor(comptime W: type) type {
                     // not yet implemented
                 },
 
-                .@"const" => {},
+                .@"const" => {
+                    const const_node = node.getConst().?;
+                    const typ = try const_node.getType();
+                    const value = try const_node.getValue();
+                    const value_tag = try value.which();
+
+                    switch (value_tag) {
+                        .void,
+                        .bool,
+                        .int8,
+                        .int16,
+                        .int32,
+                        .int64,
+                        .uint8,
+                        .uint16,
+                        .uint32,
+                        .uint64,
+                        .float32,
+                        .float64,
+                        .text,
+                        .data,
+                        .enum_,
+                        => {},
+                        .struct_ => |source| {
+                            try writeStaticConst(ctx, name, typ, source);
+                            return;
+                        },
+                        .list => |source| {
+                            try writeStaticConst(ctx, name, typ, source);
+                            return;
+                        },
+                        .anyPointer => |source| {
+                            try writeStaticConst(ctx, name, typ, source);
+                            return;
+                        },
+                        .interface, ._ => {
+                            try ctx.writeIndent();
+                            try ctx.writer.print("// unsupported const {s}: interface constants are not implemented\n", .{name});
+                            return;
+                        },
+                    }
+
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub const ");
+                    try writeReplaceKeyword(name, ctx.writer);
+                    try ctx.writer.writeAll(": ");
+                    try writeType(ctx, typ, .base, false, false);
+                    try ctx.writer.writeAll(" = ");
+                    try writeConstValue(ctx, typ, value_tag);
+                    try ctx.writer.writeAll(";\n");
+                },
 
                 .annotation => {},
 
@@ -685,6 +736,128 @@ pub fn Refactor(comptime W: type) type {
                     else => 0,
                 }}),
                 else => unreachable,
+            }
+        }
+
+        fn writeStringLiteral(writer: *W, bytes: []const u8) E!void {
+            try writer.writeByte('"');
+            for (bytes) |byte| {
+                switch (byte) {
+                    '"' => try writer.writeAll("\\\""),
+                    '\\' => try writer.writeAll("\\\\"),
+                    '\n' => try writer.writeAll("\\n"),
+                    '\r' => try writer.writeAll("\\r"),
+                    '\t' => try writer.writeAll("\\t"),
+                    0x20...0x21, 0x23...0x5b, 0x5d...0x7e => try writer.writeByte(byte),
+                    else => try writer.print("\\x{x:0>2}", .{byte}),
+                }
+            }
+            try writer.writeByte('"');
+        }
+
+        fn writeStaticConst(
+            ctx: *WriteContext,
+            name: []const u8,
+            typ: schema.Type.Reader,
+            source: capnp.AnyPointerReader,
+        ) E!void {
+            var builder = capnp.MessageBuilder{ .allocator = ctx.allocator };
+            try builder.init();
+            defer builder.deinit();
+            try builder.initFromAnyPointer(source);
+
+            const bytes = try builder.toBytes(ctx.allocator);
+            defer ctx.allocator.free(bytes);
+
+            const segment_count: usize = 1 + std.mem.readInt(u32, bytes[0..4], .little);
+            const data_start = std.mem.alignForward(usize, 4 + 4 * segment_count, 8);
+
+            try ctx.writeIndent();
+            try ctx.writer.print("const {s}_bytes align(8) = [_]u8{{\n", .{name});
+            ctx.indenter.inc();
+            try ctx.writeIndent();
+            for (bytes, 0..) |byte, i| {
+                if (i != 0 and i % 16 == 0) {
+                    try ctx.writer.writeAll("\n");
+                    try ctx.writeIndent();
+                }
+                try ctx.writer.print("0x{x:0>2}, ", .{byte});
+            }
+            try ctx.writer.writeAll("\n");
+            ctx.indenter.dec();
+            try ctx.writeIndent();
+            try ctx.writer.writeAll("};\n\n");
+
+            try ctx.writeIndent();
+            try ctx.writer.print("const {s}_segments = [_][]const u8{{\n", .{name});
+            ctx.indenter.inc();
+            var offset = data_start;
+            for (0..segment_count) |i| {
+                const segment_bytes = std.math.mul(usize, std.mem.readInt(u32, bytes[4 + i * 4 ..][0..4], .little), 8) catch return error.MessageTooLarge;
+                try ctx.writeIndent();
+                try ctx.writer.print("{s}_bytes[{d}..][0..{d}],\n", .{ name, offset, segment_bytes });
+                offset += segment_bytes;
+            }
+            ctx.indenter.dec();
+            try ctx.writeIndent();
+            try ctx.writer.writeAll("};\n\n");
+
+            try ctx.writeIndent();
+            try ctx.writer.writeAll("pub fn ");
+            try writeReplaceKeyword(name, ctx.writer);
+            try ctx.writer.writeAll("() ");
+            try writeType(ctx, typ, .reader_getter, false, false);
+            try ctx.writer.writeAll(" {\n");
+            ctx.indenter.inc();
+            try ctx.writeIndent();
+            try ctx.writer.writeAll("return capnp.getStaticRoot(");
+            try writeType(ctx, typ, .reader_getter, false, false);
+            try ctx.writer.print(", &{s}_segments) catch unreachable;\n", .{name});
+            ctx.indenter.dec();
+            try ctx.writeIndent();
+            try ctx.writer.writeAll("}\n\n");
+
+            try ctx.writeIndent();
+            try ctx.writer.print("pub fn {s}Message() []const u8 {{\n", .{name});
+            ctx.indenter.inc();
+            try ctx.writeIndent();
+            try ctx.writer.print("return &{s}_bytes;\n", .{name});
+            ctx.indenter.dec();
+            try ctx.writeIndent();
+            try ctx.writer.writeAll("}\n");
+        }
+
+        fn writeConstValue(ctx: *WriteContext, typ: schema.Type.Reader, value: schema.Value.Reader.Tag) E!void {
+            switch (value) {
+                .void => try ctx.writer.writeAll("{}"),
+                .bool => |v| try ctx.writer.writeAll(if (v) "true" else "false"),
+                .int8 => |v| try ctx.writer.print("{d}", .{v}),
+                .int16 => |v| try ctx.writer.print("{d}", .{v}),
+                .int32 => |v| try ctx.writer.print("{d}", .{v}),
+                .int64 => |v| try ctx.writer.print("{d}", .{v}),
+                .uint8 => |v| try ctx.writer.print("{d}", .{v}),
+                .uint16 => |v| try ctx.writer.print("{d}", .{v}),
+                .uint32 => |v| try ctx.writer.print("{d}", .{v}),
+                .uint64 => |v| try ctx.writer.print("{d}", .{v}),
+                .float32 => |v| try ctx.writer.print("{d}", .{v}),
+                .float64 => |v| try ctx.writer.print("{d}", .{v}),
+                .text => |v| try writeStringLiteral(ctx.writer, v),
+                .data => |v| try writeStringLiteral(ctx.writer, v),
+                .enum_ => |v| {
+                    if (typ.getEnum()) |enum_| {
+                        const id = enum_.getTypeId();
+                        const enum_node = try ctx.getNodeById(id);
+                        const enumerants = try enum_node.getEnum().?.getEnumerants();
+                        if (v < enumerants.length) {
+                            try ctx.writeNodeNameById(id);
+                            try ctx.writer.writeAll(".");
+                            try writeReplaceKeyword(try enumerants.get(v).getName(), ctx.writer);
+                            return;
+                        }
+                    }
+                    try ctx.writer.print("@fromBackingInt(@intCast({d}))", .{v});
+                },
+                .list, .struct_, .interface, .anyPointer, ._ => unreachable,
             }
         }
 
@@ -1099,6 +1272,7 @@ test "compiler" {
         .writer = &output.writer,
         .indenter = M.Indenter{},
         .nodes = &node_map,
+        .allocator = std.testing.allocator,
         .current_file_id = requested.getId(),
         .imports = imports,
     };
@@ -1188,6 +1362,7 @@ pub fn main(init: std.process.Init) !void {
             .writer = &output.writer,
             .indenter = M.Indenter{},
             .nodes = &node_map,
+            .allocator = allocator,
             .current_file_id = requested.getId(),
             .imports = imports,
         };
