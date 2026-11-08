@@ -37,15 +37,20 @@ fn generateRequest(allocator: std.mem.Allocator, request_path: []const u8) ![]u8
     var output = std.Io.Writer.Allocating.init(allocator);
     defer output.deinit();
 
-    var ctx = M.WriteContext{
-        .writer = &output.writer,
-        .indenter = M.Indenter{},
-        .nodes = &node_map,
-    };
+    var import_arena = std.heap.ArenaAllocator.init(allocator);
+    defer import_arena.deinit();
 
     const files = try request.getRequestedFiles();
     for (0..files.length) |i| {
         const requested = files.get(@intCast(i));
+        const imports = try capnpc.collectImports(import_arena.allocator(), requested);
+        var ctx = M.WriteContext{
+            .writer = &output.writer,
+            .indenter = M.Indenter{},
+            .nodes = &node_map,
+            .current_file_id = requested.getId(),
+            .imports = imports,
+        };
         const requested_file = try ctx.getNodeById(requested.getId());
         try M.writeNode(&ctx, try requested.getFilename(), requested_file);
     }
@@ -64,6 +69,7 @@ const golden_cases = [_]struct {
     .{ .request = "capnp-tests/codegen/05_default_values.request.bin", .expected = "capnp-tests/codegen-zig/generated_05_default_values.zig" },
     .{ .request = "capnp-tests/codegen/09_codegen_features.request.bin", .expected = "capnp-tests/codegen-zig/generated_09_codegen_features.zig" },
     .{ .request = "capnp-tests/codegen/10_groups.request.bin", .expected = "capnp-tests/codegen-zig/generated_10_groups.zig" },
+    .{ .request = "capnp-tests/codegen/11_constants.request.bin", .expected = "capnp-tests/codegen-zig/generated_11_constants.zig" },
 };
 
 test "golden generated code" {
