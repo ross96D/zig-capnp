@@ -27,17 +27,17 @@ fn writeWord(segment: []u8, word_index: usize, value: u64) void {
 
 fn structPointer(offset_words: i30, data_words: u16, ptr_words: u16) u64 {
     return @bitCast(capnp.Ptr.Struct{
-        .offsetWords = offset_words,
-        .dataWords = data_words,
-        .ptrWords = ptr_words,
+        .offset_words = offset_words,
+        .data_words = data_words,
+        .ptr_words = ptr_words,
     });
 }
 
 fn listPointer(offset_words: i30, element_size: u3, elements_or_words: u29) u64 {
     return @bitCast(capnp.Ptr.List{
-        .offsetWords = offset_words,
-        .elementSize = element_size,
-        .elementsOrWords = elements_or_words,
+        .offset_words = offset_words,
+        .element_size = element_size,
+        .elements_or_words = elements_or_words,
     });
 }
 
@@ -56,11 +56,6 @@ fn readContext(segments: [][]u8, counter: *capnp.Counter) capnp.ReadContext {
 /// Accepts any library error. Used where the exact error kind is an API choice.
 fn expectAnyError(result: anytype) !void {
     if (result) |_| return error.TestExpectedError else |_| {}
-}
-
-/// "Must not panic": both a successful result and an error are acceptable.
-fn acceptAnyResult(result: anytype) void {
-    if (result) |_| {} else |_| {}
 }
 
 // ---------------------------------------------------------------------------
@@ -384,8 +379,8 @@ test "BUG: StructReader custom format is not used by std.fmt (Zig 0.17)" {
 
 test "BUG: Counter overflow is reported as a limit error, not an integer overflow" {
     var counter = capnp.Counter{
-        .limit = std.math.maxInt(usize),
-        .count = std.math.maxInt(usize) - 1,
+        .limit = std.math.maxInt(u32),
+        .count = std.math.maxInt(u32) - 1,
     };
 
     try expectAnyError(counter.increment(2));
@@ -494,12 +489,25 @@ test "BUG: null struct pointer must yield an empty struct" {
     try testing.expectEqual(@as(u64, 0), s.readIntField(u64, 0));
 }
 
+test "regression: zero-sized struct uses offset -1, not null" {
+    var data: [8]u8 = @splat(0);
+    writeWord(data[0..], 0, structPointer(-1, 0, 0));
+
+    var segments = [_][]u8{data[0..]};
+    var counter = capnp.Counter{ .limit = 1000 };
+    const s = try capnp.StructReader.fromReadContext(readContext(segments[0..], &counter));
+
+    try testing.expectEqual(@as(u16, 0), s.data_words);
+    try testing.expectEqual(@as(u16, 0), s.ptr_words);
+    try testing.expectEqual(@as(u64, 0), s.readIntField(u64, 0));
+}
+
 test "BUG: struct pointer with maximal section sizes must not overflow" {
     var data: [16]u8 = @splat(0);
     writeWord(data[0..], 0, structPointer(0, 0xffff, 0xffff));
 
     var segments = [_][]u8{data[0..]};
-    var counter = capnp.Counter{ .limit = std.math.maxInt(usize) };
+    var counter = capnp.Counter{ .limit = std.math.maxInt(u32) };
     var context = readContext(segments[0..], &counter);
 
     try expectAnyError(context.readPtr());
@@ -556,19 +564,49 @@ test "BUG: single-far pointer must be resolved through its landing pad" {
     try testing.expectEqual(@as(u64, 0x1234_5678), s.readIntField(u64, 0));
 }
 
-test "BUG: double-far pointer must not hit unreachable" {
+test "regression: double-far pointer resolves to its content" {
+    var segment0: [8]u8 = @splat(0);
+    var segment1: [16]u8 = @splat(0);
+    var segment2: [8]u8 = @splat(0);
+
+    writeWord(segment0[0..], 0, farPointer(1, 0, true));
+    // Double-far landing pad: word 0 points at the content, word 1 is the tag.
+    writeWord(segment1[0..], 0, farPointer(2, 0, false));
+    writeWord(segment1[0..], 1, structPointer(0, 1, 0));
+    writeWord(segment2[0..], 0, 0xabcd_ef01);
+
+    var segments = [_][]u8{ segment0[0..], segment1[0..], segment2[0..] };
+    var counter = capnp.Counter{ .limit = 1000 };
+    const context = readContext(segments[0..], &counter);
+
+    const s = try capnp.StructReader.fromReadContext(context);
+    try testing.expectEqual(@as(u64, 0xabcd_ef01), s.readIntField(u64, 0));
+}
+
+test "BUG: double-far pad word 0 must be a far pointer" {
     var segment0: [8]u8 = @splat(0);
     var segment1: [16]u8 = @splat(0);
 
     writeWord(segment0[0..], 0, farPointer(1, 0, true));
+    // word 0 is null instead of a far pointer.
+    writeWord(segment1[0..], 1, structPointer(0, 1, 0));
 
     var segments = [_][]u8{ segment0[0..], segment1[0..] };
     var counter = capnp.Counter{ .limit = 1000 };
     const context = readContext(segments[0..], &counter);
 
-    // Either resolving the pointer or returning an error is acceptable;
-    // hitting `unreachable` is the bug.
-    acceptAnyResult(capnp.StructReader.fromReadContext(context));
+    try expectAnyError(capnp.StructReader.fromReadContext(context));
+}
+
+test "BUG: far pointer landing pad beyond the segment must be rejected" {
+    var data: [8]u8 = @splat(0);
+    writeWord(data[0..], 0, farPointer(0, 1, false)); // pad is word 1, but only word 0 exists
+
+    var segments = [_][]u8{data[0..]};
+    var counter = capnp.Counter{ .limit = 1000 };
+    var context = readContext(segments[0..], &counter);
+
+    try expectAnyError(context.readPtr());
 }
 
 test "BUG: missing pointer field must read as a null pointer" {

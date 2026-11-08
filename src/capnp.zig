@@ -5,15 +5,15 @@ const Allocator = std.mem.Allocator;
 pub const Ptr = union(enum) {
     pub const Struct = packed struct(u64) {
         type: u2 = 0,
-        offsetWords: i30,
-        dataWords: u16,
-        ptrWords: u16,
+        offset_words: i30,
+        data_words: u16,
+        ptr_words: u16,
     };
     pub const List = packed struct(u64) {
         type: u2 = 1,
-        offsetWords: i30,
-        elementSize: u3,
-        elementsOrWords: u29,
+        offset_words: i30,
+        element_size: u3,
+        elements_or_words: u29,
     };
     pub const InterSegment = packed struct(u64) {
         type: u2 = 2,
@@ -92,11 +92,11 @@ pub const Error = error{
 pub const BuildError = Allocator.Error || Error;
 
 pub const Counter = struct {
-    count: usize = 0,
-    limit: usize,
+    count: u32 = 0,
+    limit: u32,
 
-    pub fn increment(self: *Counter, x: usize) Error!void {
-        self.count = std.math.add(usize, self.count, x) catch return Error.LimitExceeded;
+    pub fn increment(self: *Counter, x: u32) Error!void {
+        self.count = std.math.add(u32, self.count, x) catch return Error.LimitExceeded;
 
         if (self.count >= self.limit) {
             return Error.LimitExceeded;
@@ -116,14 +116,40 @@ pub const ReadContext = struct {
         return self.offset_words << 3;
     }
 
-    pub fn relativeWords(self: *ReadContext, dx: i30) void {
-        self.offset_words = @intCast(dx + self.offset_words);
+    fn readWordAt(self: ReadContext, segment: u32, word: u32) Error!u64 {
+        if (segment >= self.segments.len) return Error.InvalidPointer;
+        const seg = self.segments[segment];
+        const pos: u64 = @as(u64, word) * 8;
+        if (pos + 8 > seg.len) return Error.OutOfBounds;
+        return std.mem.readInt(u64, seg[@intCast(pos)..][0..8], .little);
+    }
+
+    /// Validates that [start_word, start_word + words) is inside `segment`.
+    /// Zero-sized objects are allowed to sit at the end of a segment.
+    fn checkObject(self: ReadContext, segment: u32, start_word: u32, words: u32) Error!u29 {
+        if (segment >= self.segments.len) return Error.InvalidPointer;
+
+        const start: u64 = @intCast(start_word);
+        const segment_words: u64 = self.segments[segment].len / 8;
+        if (start > segment_words) return Error.OutOfBounds;
+        // substract to avoid overflow
+        if (words > segment_words - start) return Error.OutOfBounds;
+        if (start > std.math.maxInt(u29)) return Error.InvalidPointer;
+
+        return @intCast(start);
     }
 
     pub fn readIntWithBound(self: ReadContext, comptime T: type, offset: u32, bound_words: u29) T {
-        const pos = self.offsetBytes() + @sizeOf(T) * offset;
-        std.debug.print("POS {} {}\n", .{ pos, self.segments[self.segment].len });
-        return if (@sizeOf(T) * offset < bound_words << 3) std.mem.readInt(T, self.segments[self.segment][pos..][0..@sizeOf(T)], .little) else 0;
+        // Check the declared data-section bound first. This must not touch the
+        // segment, so empty structs can be read through a dummy context.
+        if (@as(u64, @sizeOf(T)) * offset >= (@as(u64, bound_words) << 3)) return 0;
+        if (self.segment >= self.segments.len) return 0;
+
+        const pos: u64 = @as(u64, self.offset_words) * 8 + @as(u64, @sizeOf(T)) * offset;
+        const seg = self.segments[self.segment];
+        if (pos + @sizeOf(T) > seg.len) return 0;
+
+        return std.mem.readInt(T, seg[@intCast(pos)..][0..@sizeOf(T)], .little);
     }
 
     pub fn readInt(self: ReadContext, comptime T: type, offset: u32) T {
@@ -131,42 +157,126 @@ pub const ReadContext = struct {
         return std.mem.readInt(T, self.segments[self.segment][pos..][0..@sizeOf(T)], .little);
     }
 
-    pub fn readPtrN(self: ReadContext) Ptr {
-        return Ptr.of_u64(self.readInt(u64, 0));
+    pub fn readPtrN(self: ReadContext) Error!Ptr {
+        return Ptr.of_u64(try self.readWordAt(self.segment, self.offset_words));
     }
 
     pub fn readPtr(self: *ReadContext) Error!Ptr {
-        const ptr = self.readPtrN();
-        switch (ptr) {
-            .struct_ => |x| {
-                try self.depth_counter.increment(1);
-                try self.traversal_counter.increment(x.dataWords + x.ptrWords);
-                self.relativeWords(1 + x.offsetWords);
-            },
-            .list => |x| {
-                try self.depth_counter.increment(1);
-                // TODO: work out size of a list for traversal
-                // try self.counters.traversal.increment();
-                self.relativeWords(1 + x.offsetWords);
-            },
-            .inter_segment => |x| {
-                try self.depth_counter.increment(1);
-                if (x.double) {
-                    unreachable;
-                } else {
-                    // TODO: explicitly check segment bounds
-                    self.segment = x.segment;
-                    self.offset_words = x.offset;
-                }
-            },
-            else => {},
+        var hops: u8 = 0;
+
+        while (true) {
+            hops += 1;
+            if (hops > 2) return Error.InvalidPointer;
+
+            const raw = try self.readPtrN();
+
+            var tag: Ptr = undefined;
+            var content_segment: u32 = 0;
+            var content_word_offset: u32 = 0;
+
+            switch (raw) {
+                .null, .capability => return raw,
+                .inter_segment => |far| {
+                    if (far.segment >= self.segments.len) return Error.InvalidPointer;
+
+                    const pad_words: u64 = if (far.double) 2 else 1;
+                    const segment_words: u64 = self.segments[far.segment].len / 8;
+                    if (@as(u64, far.offset) + pad_words > segment_words) return Error.OutOfBounds;
+
+                    if (!far.double) {
+                        // The landing pad is a normal pointer relative to itself.
+                        self.segment = far.segment;
+                        self.offset_words = far.offset;
+                        continue;
+                    }
+
+                    // Double-far: word 0 points at the content, word 1 is a tag.
+                    const far_content = Ptr.of_u64(try self.readWordAt(far.segment, far.offset));
+                    switch (far_content) {
+                        .inter_segment => |target| {
+                            if (target.double) return Error.InvalidPointer;
+                            if (target.segment >= self.segments.len) return Error.InvalidPointer;
+                            content_segment = target.segment;
+                            content_word_offset = target.offset;
+                        },
+                        else => return Error.InvalidPointer,
+                    }
+
+                    tag = Ptr.of_u64(try self.readWordAt(far.segment, @as(u32, far.offset) + 1));
+                },
+                .struct_ => |s| {
+                    content_segment = self.segment;
+                    const tmp = @as(i32, self.offset_words) + 1 + @as(i32, s.offset_words);
+                    if (tmp < 0) return Error.InvalidPointer;
+                    content_word_offset = @intCast(tmp);
+                    tag = raw;
+                },
+                .list => |l| {
+                    content_segment = self.segment;
+                    const tmp = @as(i32, self.offset_words) + 1 + @as(i32, l.offset_words);
+                    if (tmp < 0) return Error.InvalidPointer;
+                    content_word_offset = @intCast(tmp);
+                    tag = raw;
+                },
+            }
+
+            switch (tag) {
+                .struct_ => |s| {
+                    const words = @as(u32, s.data_words) + s.ptr_words;
+                    const word = try self.checkObject(content_segment, content_word_offset, words);
+
+                    try self.depth_counter.increment(1);
+                    try self.traversal_counter.increment(words);
+
+                    self.segment = content_segment;
+                    self.offset_words = word;
+
+                    return Ptr{
+                        .struct_ = .{
+                            .offset_words = 0,
+                            .data_words = s.data_words,
+                            .ptr_words = s.ptr_words,
+                        },
+                    };
+                },
+                .list => |l| {
+                    const words: u32 = switch (l.element_size) {
+                        0 => 0,
+                        1 => (l.elements_or_words + 63) / 64,
+                        2 => (l.elements_or_words + 7) / 8,
+                        3 => (l.elements_or_words + 3) / 4,
+                        4 => (l.elements_or_words + 1) / 2,
+                        5, 6 => l.elements_or_words,
+                        7 => 1 + l.elements_or_words,
+                    };
+                    const word = try self.checkObject(content_segment, content_word_offset, words);
+
+                    try self.depth_counter.increment(1);
+                    try self.traversal_counter.increment(words);
+
+                    self.segment = content_segment;
+                    self.offset_words = word;
+
+                    return Ptr{ .list = .{
+                        .offset_words = 0,
+                        .element_size = l.element_size,
+                        .elements_or_words = l.elements_or_words,
+                    } };
+                },
+                else => return Error.InvalidPointer,
+            }
         }
-        return ptr;
     }
 
-    pub fn readString(self: ReadContext, length: u32) []u8 {
+    pub fn readString(self: ReadContext, length: u32) Error![]u8 {
         if (length == 0) return "";
-        return self.segments[self.segment][self.offsetBytes()..][0 .. length - 1];
+        if (self.segment >= self.segments.len) return Error.InvalidPointer;
+
+        const start: u64 = @as(u64, self.offset_words) * 8;
+        const seg = self.segments[self.segment];
+        if (start + length > seg.len) return Error.OutOfBounds;
+
+        return seg[@intCast(start)..][0 .. length - 1];
     }
 
     pub fn fromSegments(segments: [][]u8, traversal_counter: *Counter) ReadContext {
@@ -203,6 +313,10 @@ pub const AnyPointerReader = struct {
             .ptr = ptr,
         };
     }
+
+    pub fn fromNull(context: ReadContext) AnyPointerReader {
+        return .{ .context = context, .ptr = .null };
+    }
 };
 
 pub const StructReader = struct {
@@ -222,14 +336,14 @@ pub const StructReader = struct {
     }
 
     pub fn readPtrField(self: StructReader, comptime T: type, ptrNo: u16) Error!T {
-        if (ptrNo < self.ptr_words) {
-            std.debug.assert(ptrNo < self.ptr_words);
-            var context = self.context;
-            context.relativeWords(self.data_words + ptrNo);
-            return try T.fromReadContext(context);
-        } else {
-            unreachable;
-        }
+        // A field past the end of the pointer section reads as null. This is
+        // normal when a newer schema reads an older, shorter struct.
+        if (ptrNo >= self.ptr_words) return T.fromNull(self.context);
+
+        var context = self.context;
+        context.offset_words = @intCast(@as(u64, context.offset_words) +
+            @as(u64, self.data_words) + ptrNo);
+        return try T.fromReadContext(context);
     }
 
     pub fn readVoid(_: StructBuilder) void {}
@@ -249,13 +363,24 @@ pub const StructReader = struct {
 
     pub fn fromReadContext(context: ReadContext) Error!StructReader {
         var _context = context;
-        const struct_ = (try _context.readPtr()).struct_;
 
-        return StructReader{
-            .context = _context,
-            .data_words = struct_.dataWords,
-            .ptr_words = struct_.ptrWords,
+        return switch (try _context.readPtr()) {
+            .null => .{
+                .context = _context,
+                .data_words = 0,
+                .ptr_words = 0,
+            },
+            .struct_ => |s| .{
+                .context = _context,
+                .data_words = s.data_words,
+                .ptr_words = s.ptr_words,
+            },
+            else => Error.TypeMismatch,
         };
+    }
+
+    pub fn fromNull(context: ReadContext) StructReader {
+        return .{ .context = context, .data_words = 0, .ptr_words = 0 };
     }
 
     pub fn format(value: StructReader, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
@@ -337,39 +462,40 @@ pub fn ListReader(comptime T: type) type {
         length: u29,
 
         pub fn fromReadContext(context: ReadContext) Error!Self {
-            // for now, ignore the possibility that this may be a far pointer.
             var _context = context;
             switch (try _context.readPtr()) {
+                .null => return Self.fromNull(context),
                 .list => |list| {
-                    if (T == u8) {
-                        std.debug.assert(list.elementSize == 2);
-                    }
+                    const expected_element_size: u3 = switch (T) {
+                        void => 0,
+                        bool => 1,
+                        u8, i8 => 2,
+                        u16, i16 => 3,
+                        u32, i32, f32 => 4,
+                        u64, i64, f64 => 5,
+                        else => @compileError("unsupported list element type"),
+                    };
+                    if (list.element_size != expected_element_size) return Error.TypeMismatch;
 
                     return Self{
                         .context = _context,
-                        .elementSize = list.elementSize,
-                        .length = list.elementsOrWords,
+                        .elementSize = list.element_size,
+                        .length = list.elements_or_words,
                     };
                 },
-                .null => {
-                    return Self{
-                        .context = context,
-                        .elementSize = 0,
-                        .length = 0,
-                    };
-                },
-                else => unreachable,
+                else => return Error.TypeMismatch,
             }
-            const list = (try _context.readPtr()).list;
-            _ = list;
-
-            //std.debug.print("offsetWords={}, startOffsetWords={}, b={}\n", .{ offsetWords, startOffsetWords, b });
-
         }
+
+        pub fn fromNull(context: ReadContext) Self {
+            return .{ .context = context, .elementSize = 0, .length = 0 };
+        }
+
         pub fn get(self: Self, ix: u32) T {
             return self.context.readInt(T, ix);
         }
-        pub fn getString(self: Self) []u8 {
+
+        pub fn getString(self: Self) Error![]u8 {
             comptime std.debug.assert(T == u8);
             return self.context.readString(self.length);
         }
@@ -423,7 +549,7 @@ pub fn ListBuilder(comptime T: type) type {
 
             self.length = length;
 
-            self.ptr.writePtr(Ptr{ .list = .{ .offsetWords = offsetWords, .elementsOrWords = length, .elementSize = self.elementSize } });
+            self.ptr.writePtr(Ptr{ .list = .{ .offset_words = offsetWords, .elements_or_words = length, .element_size = self.elementSize } });
         }
 
         pub fn set(self: *Self, index: u32, value: T) void {
@@ -485,14 +611,14 @@ pub fn CompositeListBuilder(comptime T: type) type {
             self.context = structPtr;
             self.context.?.offsetWords += 1;
 
-            structPtr.writePtr(Ptr{ .struct_ = .{ .offsetWords = length, .dataWords = T._Metadata.dataWords, .ptrWords = T._Metadata.ptrWords } });
+            structPtr.writePtr(Ptr{ .struct_ = .{ .offset_words = length, .data_words = T._Metadata.dataWords, .ptr_words = T._Metadata.ptrWords } });
 
             std.debug.assert(structPtr.segment == self.ptr.segment);
             const offsetWords: i30 = @intCast(structPtr.offsetWords - self.ptr.offsetWords - 1);
 
             self.length = length;
 
-            self.ptr.writePtr(Ptr{ .list = .{ .offsetWords = offsetWords, .elementsOrWords = sizeInWords, .elementSize = 7 } });
+            self.ptr.writePtr(Ptr{ .list = .{ .offset_words = offsetWords, .elements_or_words = sizeInWords, .element_size = 7 } });
         }
 
         pub fn get(self: Self, ix: u32) T.Builder {
@@ -544,39 +670,42 @@ pub fn CompositeListReader(comptime T: type) type {
         pub const empty = Self{ .context = null, .elementSize = 0, .length = 0, .dataWords = 0, .ptrWords = 0 };
 
         pub fn fromReadContext(context: ReadContext) Error!Self {
-            // for now, ignore the possibility that this may be a far pointer.
             var _context = context;
 
             switch (try _context.readPtr()) {
+                .null => return Self.empty,
                 .list => |list_ptr| {
-                    if (list_ptr.elementSize == 7) {
-                        const struct_ptr = _context.readPtrN().struct_;
-                        _context.relativeWords(1);
+                    if (list_ptr.element_size != 7) return Error.TypeMismatch;
 
-                        return Self{
-                            .context = _context,
+                    switch (try _context.readPtrN()) {
+                        .struct_ => |struct_ptr| {
+                            if (struct_ptr.offset_words < 0) return Error.InvalidPointer;
 
-                            .elementSize = list_ptr.elementSize,
-                            .length = @intCast(struct_ptr.offsetWords),
+                            const length: u29 = @intCast(struct_ptr.offset_words);
+                            const stride = @as(u64, struct_ptr.data_words) + struct_ptr.ptr_words;
+                            if (@as(u64, length) * stride > list_ptr.elements_or_words) {
+                                return Error.OutOfBounds;
+                            }
 
-                            .dataWords = struct_ptr.dataWords,
-                            .ptrWords = struct_ptr.ptrWords,
-                        };
-                    } else {
-                        unreachable;
+                            _context.offset_words += 1;
+
+                            return Self{
+                                .context = _context,
+                                .elementSize = 7,
+                                .length = length,
+                                .dataWords = struct_ptr.data_words,
+                                .ptrWords = struct_ptr.ptr_words,
+                            };
+                        },
+                        else => return Error.TypeMismatch,
                     }
                 },
-                .null => {
-                    return Self{
-                        .context = _context,
-                        .elementSize = 0,
-                        .length = 0,
-                        .dataWords = 0,
-                        .ptrWords = 0,
-                    };
-                },
-                else => unreachable,
+                else => return Error.TypeMismatch,
             }
+        }
+
+        pub fn fromNull(_: ReadContext) Self {
+            return Self.empty;
         }
 
         pub fn iter(self: Self) ListIterator(Self, T.Reader) {
@@ -590,7 +719,8 @@ pub fn CompositeListReader(comptime T: type) type {
             std.debug.assert(ix < self.length);
 
             var _context = self.context.?;
-            _context.relativeWords(@intCast((self.ptrWords + self.dataWords) * ix));
+            const stride = @as(u64, self.ptrWords) + self.dataWords;
+            _context.offset_words = @intCast(@as(u64, _context.offset_words) + stride * ix);
 
             return T.Reader{
                 .reader = StructReader{
@@ -688,9 +818,9 @@ pub const BuildContext = struct {
         } else {
             self.writePtr(Ptr{
                 .struct_ = .{
-                    .offsetWords = builderCtx.offsetWords,
-                    .ptrWords = ptrWords,
-                    .dataWords = dataWords,
+                    .offset_words = builderCtx.offsetWords,
+                    .ptr_words = ptrWords,
+                    .data_words = dataWords,
                 },
             });
         }
@@ -788,7 +918,6 @@ pub const MessageBuilder = struct {
 
     pub fn initRootStruct(self: *MessageBuilder, comptime T: type) BuildError!T.Builder {
         var ctx = try self.alloc(0, 1);
-        std.debug.print("initRootStruct {} {}\n", .{ self.segments.len, self.segment_store[0].len });
         return T.Builder{ .builder = try ctx.allocStruct(T._Metadata.dataWords, T._Metadata.ptrWords) };
     }
 };
