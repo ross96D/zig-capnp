@@ -113,6 +113,14 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    // The generated modules imported by capnp-tests/codegen.zig are not
+    // checked into the repository. Generate only the missing artifacts before
+    // compiling the codegen tests, and leave existing artifacts untouched.
+    const generate_codegen = b.addSystemCommand(&.{ "bash", "codegen_zig.bash" });
+    generate_codegen.addArtifactArg(compiler_exe);
+    generate_codegen.setCwd(b.path("."));
+    codegen_tests.step.dependOn(&generate_codegen.step);
+
     const run_codegen_tests = b.addRunArtifact(codegen_tests);
 
     const capnp_test = b.addTest(.{

@@ -179,6 +179,77 @@ test "generated text, data, enum, list, and defaults round-trip" {
     try std.testing.expectEqualStrings("child", try (try reader.child()).name());
 }
 
+test "generated AnyPointer round-trip" {
+    {
+        var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+        try builder.init();
+        defer builder.deinit();
+
+        var root = try builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
+        try root.ptr().setText("any-pointer");
+
+        var message = builder.toReader();
+        const reader = try message.getRootStruct(features.Features.Reader, features.Features.reader_trait);
+        try std.testing.expectEqualStrings("any-pointer", try (try reader.ptr()).asText());
+    }
+
+    {
+        var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+        try builder.init();
+        defer builder.deinit();
+
+        var root = try builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
+        var nested = try root.ptr().initStruct(features.Features.Builder, features.Features.builder_trait);
+        try nested.setName("nested");
+
+        var message = builder.toReader();
+        const reader = try message.getRootStruct(features.Features.Reader, features.Features.reader_trait);
+        const nested_reader = try (try reader.ptr()).asStruct(features.Features.Reader, features.Features.reader_trait);
+        try std.testing.expectEqualStrings("nested", try nested_reader.name());
+    }
+
+    {
+        var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+        try builder.init();
+        defer builder.deinit();
+
+        var root = try builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
+        var list = root.ptr().initList(u16);
+        try list.init(2);
+        list.set(0, 7);
+        list.set(1, 9);
+
+        var message = builder.toReader();
+        const reader = try message.getRootStruct(features.Features.Reader, features.Features.reader_trait);
+        const got = try (try reader.ptr()).asList(u16);
+        try std.testing.expectEqual(@as(u29, 2), got.length);
+        try std.testing.expectEqual(@as(u16, 7), got.get(0));
+        try std.testing.expectEqual(@as(u16, 9), got.get(1));
+    }
+
+    {
+        var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+        try builder.init();
+        defer builder.deinit();
+
+        var root = try builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
+        var list = root.ptr().initCompositeList(features.Features.Builder, features.Features.builder_trait);
+        try list.init(2);
+
+        var first = list.get(0);
+        try first.setName("first");
+        var second = list.get(1);
+        try second.setName("second");
+
+        var message = builder.toReader();
+        const reader = try message.getRootStruct(features.Features.Reader, features.Features.reader_trait);
+        const got = try (try reader.ptr()).asCompositeList(features.Features.Reader, features.Features.reader_trait);
+        try std.testing.expectEqual(@as(u29, 2), got.length);
+        try std.testing.expectEqualStrings("first", try got.get(0).name());
+        try std.testing.expectEqualStrings("second", try got.get(1).name());
+    }
+}
+
 test "generated groups round-trip" {
     var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
     try builder.init();

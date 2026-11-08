@@ -3544,11 +3544,11 @@ pub const Value = struct {
             try self.builder.writeDataField(0, v);
         }
 
-        pub fn list(self: @This()) capnp.BuildError!?capnp.AnyPointerReader {
+        pub fn list(self: @This()) ?capnp.AnyPointerBuilder {
             if (self.builder.readIntField(u16, 0) != 14) {
                 return null;
             }
-            return try self.builder.readPtrField(capnp.AnyPointerReader, 0);
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
         pub fn @"enum"(self: @This()) ?u16 {
@@ -3563,11 +3563,11 @@ pub const Value = struct {
             self.builder.writeIntField(u16, 1, v ^ 0);
         }
 
-        pub fn @"struct"(self: @This()) capnp.BuildError!?capnp.AnyPointerReader {
+        pub fn @"struct"(self: @This()) ?capnp.AnyPointerBuilder {
             if (self.builder.readIntField(u16, 0) != 16) {
                 return null;
             }
-            return try self.builder.readPtrField(capnp.AnyPointerReader, 0);
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
         /// The only interface value that can be represented statically is "null", whose methods always
@@ -3584,11 +3584,11 @@ pub const Value = struct {
             return;
         }
 
-        pub fn anyPointer(self: @This()) capnp.BuildError!?capnp.AnyPointerReader {
+        pub fn anyPointer(self: @This()) ?capnp.AnyPointerBuilder {
             if (self.builder.readIntField(u16, 0) != 18) {
                 return null;
             }
-            return try self.builder.readPtrField(capnp.AnyPointerReader, 0);
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
     };
 

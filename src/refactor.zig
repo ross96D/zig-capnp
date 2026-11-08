@@ -368,10 +368,11 @@ pub fn Refactor(comptime W: type) type {
                 switch (field.which()) {
                     .slot => {
                         const typ = try field.slot().?.type();
+                        const with_error = !(gt == .builder and typ.which() == .anyPointer);
                         try ctx.writer.writeAll("pub fn ");
                         try writeReplaceKeyword(name, ctx.writer);
                         try ctx.writer.writeAll("(self: @This()) ");
-                        try writeType(ctx, typ, tgt, true, field.discriminantValue() != 0xffff);
+                        try writeType(ctx, typ, tgt, with_error, field.discriminantValue() != 0xffff);
                         try ctx.writer.writeAll(" {\n");
                     },
                     .group => {
@@ -469,7 +470,11 @@ pub fn Refactor(comptime W: type) type {
                         .builder_getter => ".Builder",
                     });
                 },
-                .interface, .anyPointer => try ctx.writer.writeAll("capnp.AnyPointerReader"),
+                .interface => try ctx.writer.writeAll("capnp.AnyPointerReader"),
+                .anyPointer => try ctx.writer.writeAll(switch (gt) {
+                    .builder_getter => "capnp.AnyPointerBuilder",
+                    else => "capnp.AnyPointerReader",
+                }),
                 else => try ctx.writer.writeAll("capnp.AnyPointerReader"),
             }
         }
@@ -1234,7 +1239,14 @@ pub fn Refactor(comptime W: type) type {
                                 try ctx.writer.print("{d});\n", .{slot.offset()});
                             }
                         },
-                        .anyPointer, .interface => {
+                        .anyPointer => {
+                            if (gt == .builder) {
+                                try ctx.writer.print("return self.builder.buildPtrField(capnp.AnyPointerBuilder, {d});\n", .{slot.offset()});
+                            } else {
+                                try ctx.writer.print("return try self.reader.readPtrField(capnp.AnyPointerReader, {d});\n", .{slot.offset()});
+                            }
+                        },
+                        .interface => {
                             try ctx.writer.print("return try self.{s}.readPtrField(capnp.AnyPointerReader, {d});\n", .{ target, slot.offset() });
                         },
                         .@"enum" => {

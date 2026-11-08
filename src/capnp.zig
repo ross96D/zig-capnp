@@ -336,6 +336,94 @@ pub const AnyPointerReader = struct {
     pub fn fromNull(context: ReadContext) AnyPointerReader {
         return .{ .context = context, .ptr = .null };
     }
+
+    pub fn asStruct(self: AnyPointerReader, comptime T: type, comptime trait: ReaderTrait(T)) Error!T {
+        return switch (self.ptr) {
+            .struct_ => |s| trait.reader(.{
+                .context = self.context,
+                .data_words = s.data_words,
+                .ptr_words = s.ptr_words,
+            }),
+            .null => trait.reader(StructReader.fromNull(self.context)),
+            else => Error.TypeMismatch,
+        };
+    }
+
+    pub fn asList(self: AnyPointerReader, comptime T: type) Error!ListReader(T) {
+        return switch (self.ptr) {
+            .list => |list| ListReader(T).fromPtr(self.context, list),
+            .null => ListReader(T).fromNull(self.context),
+            else => Error.TypeMismatch,
+        };
+    }
+
+    pub fn asCompositeList(self: AnyPointerReader, comptime T: type, comptime trait: ReaderTrait(T)) Error!CompositeListReader(T, trait) {
+        return switch (self.ptr) {
+            .list => |list| CompositeListReader(T, trait).fromPtr(self.context, list),
+            .null => CompositeListReader(T, trait).empty,
+            else => Error.TypeMismatch,
+        };
+    }
+
+    pub fn asText(self: AnyPointerReader) Error![:0]const u8 {
+        return switch (self.ptr) {
+            .list => |list| (try ListReader(u8).fromPtr(self.context, list)).getString(),
+            .null => "",
+            else => Error.TypeMismatch,
+        };
+    }
+
+    pub fn asData(self: AnyPointerReader) Error![]const u8 {
+        return switch (self.ptr) {
+            .list => |list| (try ListReader(u8).fromPtr(self.context, list)).getData(),
+            .null => "",
+            else => Error.TypeMismatch,
+        };
+    }
+};
+
+pub const AnyPointerBuilder = struct {
+    context: BuildContext,
+
+    pub fn fromBuildContext(context: BuildContext) AnyPointerBuilder {
+        return .{ .context = context };
+    }
+
+    pub fn initStruct(self: AnyPointerBuilder, comptime T: type, comptime trait: BuilderTrait(T)) BuildError!T {
+        var ptr = self.context;
+        return trait.builder(try ptr.allocStruct(trait.data_words, trait.ptr_words));
+    }
+
+    pub fn initList(self: AnyPointerBuilder, comptime T: type) ListBuilder(T) {
+        return ListBuilder(T).fromBuildContext(self.context);
+    }
+
+    pub fn initCompositeList(self: AnyPointerBuilder, comptime T: type, comptime trait: BuilderTrait(T)) CompositeListBuilder(T, trait) {
+        return CompositeListBuilder(T, trait).fromBuildContext(self.context);
+    }
+
+    pub fn setText(self: AnyPointerBuilder, value: [:0]const u8) BuildError!void {
+        var list = ListBuilder(u8).fromBuildContext(self.context);
+        try list.init(@intCast(value.len + 1));
+        for (value, 0..) |byte, i| list.set(@intCast(i), byte);
+        list.set(@intCast(value.len), 0);
+    }
+
+    pub fn setData(self: AnyPointerBuilder, value: []const u8) BuildError!void {
+        var list = ListBuilder(u8).fromBuildContext(self.context);
+        try list.init(@intCast(value.len));
+        for (value, 0..) |byte, i| list.set(@intCast(i), byte);
+    }
+
+    pub fn setFromReader(self: AnyPointerBuilder, source: AnyPointerReader) BuildError!void {
+        var context = self.context;
+        try context.builder.copyPointerTo(&context, source);
+    }
+
+    pub fn clear(self: AnyPointerBuilder) void {
+        var context = self.context;
+        context.writePtr(.null);
+    }
 };
 
 pub const StructReader = struct {
@@ -598,17 +686,19 @@ pub fn ListReader(comptime T: type) type {
             var _context = context;
             switch (try _context.readPtr()) {
                 .null => return Self.fromNull(context),
-                .list => |list| {
-                    if (list.element_size != listElementSize(T)) return Error.TypeMismatch;
-
-                    return Self{
-                        .context = _context,
-                        .elementSize = list.element_size,
-                        .length = list.elements_or_words,
-                    };
-                },
+                .list => |list| return Self.fromPtr(_context, list),
                 else => return Error.TypeMismatch,
             }
+        }
+
+        pub fn fromPtr(context: ReadContext, list: Ptr.List) Error!Self {
+            if (list.element_size != listElementSize(T)) return Error.TypeMismatch;
+
+            return Self{
+                .context = context,
+                .elementSize = list.element_size,
+                .length = list.elements_or_words,
+            };
         }
 
         pub fn fromNull(context: ReadContext) Self {
@@ -806,38 +896,41 @@ pub fn CompositeListReader(
 
             switch (try _context.readPtr()) {
                 .null => return Self.empty,
-                .list => |list_ptr| {
-                    if (list_ptr.element_size != 7) return Error.TypeMismatch;
+                .list => |list_ptr| return Self.fromPtr(_context, list_ptr),
+                else => return Error.TypeMismatch,
+            }
+        }
 
-                    switch (try _context.readPtrN()) {
-                        .struct_ => |struct_ptr| {
-                            if (struct_ptr.offset_words < 0) return Error.InvalidPointer;
+        pub fn fromPtr(context: ReadContext, list_ptr: Ptr.List) Error!Self {
+            if (list_ptr.element_size != 7) return Error.TypeMismatch;
 
-                            const length: u29 = @intCast(struct_ptr.offset_words);
-                            const stride = @as(u64, struct_ptr.data_words) + struct_ptr.ptr_words;
-                            if (@as(u64, length) * stride > list_ptr.elements_or_words) {
-                                return Error.OutOfBounds;
-                            }
+            var _context = context;
+            switch (try _context.readPtrN()) {
+                .struct_ => |struct_ptr| {
+                    if (struct_ptr.offset_words < 0) return Error.InvalidPointer;
 
-                            // Zero-sized structs still count as one word per
-                            // element against the traversal limit.
-                            if (stride == 0) {
-                                _context.traversal_counter.increment(length) catch
-                                    return Error.TraversalLimitExceeded;
-                            }
-
-                            _context.offset_words += 1;
-
-                            return Self{
-                                .context = _context,
-                                .elementSize = 7,
-                                .length = length,
-                                .dataWords = struct_ptr.data_words,
-                                .ptrWords = struct_ptr.ptr_words,
-                            };
-                        },
-                        else => return Error.TypeMismatch,
+                    const length: u29 = @intCast(struct_ptr.offset_words);
+                    const stride = @as(u64, struct_ptr.data_words) + struct_ptr.ptr_words;
+                    if (@as(u64, length) * stride > list_ptr.elements_or_words) {
+                        return Error.OutOfBounds;
                     }
+
+                    // Zero-sized structs still count as one word per
+                    // element against the traversal limit.
+                    if (stride == 0) {
+                        _context.traversal_counter.increment(length) catch
+                            return Error.TraversalLimitExceeded;
+                    }
+
+                    _context.offset_words += 1;
+
+                    return Self{
+                        .context = _context,
+                        .elementSize = 7,
+                        .length = length,
+                        .dataWords = struct_ptr.data_words,
+                        .ptrWords = struct_ptr.ptr_words,
+                    };
                 },
                 else => return Error.TypeMismatch,
             }
