@@ -63,10 +63,12 @@ fn expectAnyError(result: anytype) !void {
 // ---------------------------------------------------------------------------
 
 const OneWord = struct {
-    pub const _Metadata = capnp.StructMetadata{ .dataWords = 1, .ptrWords = 0 };
-
     pub const Reader = struct {
         reader: capnp.Struct.Reader,
+
+        pub fn fromStructReader(reader: capnp.Struct.Reader) Reader {
+            return .{ .reader = reader };
+        }
 
         pub fn getValue(self: Reader) u64 {
             return self.reader.readIntField(u64, 0);
@@ -76,17 +78,30 @@ const OneWord = struct {
     pub const Builder = struct {
         builder: capnp.Struct.Builder,
 
+        pub fn fromStructBuilder(builder: capnp.Struct.Builder) Builder {
+            return .{ .builder = builder };
+        }
+
         pub fn setValue(self: Builder, value: u64) void {
             self.builder.writeIntField(u64, 0, value);
         }
+    };
+
+    pub const struct_trait = capnp.StructTrait(@This()){
+        .data_words = 1,
+        .ptr_words = 0,
+        .reader = Reader.fromStructReader,
+        .builder = Builder.fromStructBuilder,
     };
 };
 
 const BigStruct = struct {
-    pub const _Metadata = capnp.StructMetadata{ .dataWords = 9000, .ptrWords = 0 };
-
     pub const Reader = struct {
         reader: capnp.Struct.Reader,
+
+        pub fn fromStructReader(reader: capnp.Struct.Reader) Reader {
+            return .{ .reader = reader };
+        }
 
         pub fn getValue(self: Reader) u64 {
             return self.reader.readIntField(u64, 0);
@@ -96,17 +111,30 @@ const BigStruct = struct {
     pub const Builder = struct {
         builder: capnp.Struct.Builder,
 
+        pub fn fromStructBuilder(builder: capnp.Struct.Builder) Builder {
+            return .{ .builder = builder };
+        }
+
         pub fn setValue(self: Builder, value: u64) void {
             self.builder.writeIntField(u64, 0, value);
         }
     };
+
+    pub const struct_trait = capnp.StructTrait(@This()){
+        .data_words = 9000,
+        .ptr_words = 0,
+        .reader = Reader.fromStructReader,
+        .builder = Builder.fromStructBuilder,
+    };
 };
 
 const ByteListHolder = struct {
-    pub const _Metadata = capnp.StructMetadata{ .dataWords = 0, .ptrWords = 1 };
-
     pub const Reader = struct {
         reader: capnp.Struct.Reader,
+
+        pub fn fromStructReader(reader: capnp.Struct.Reader) Reader {
+            return .{ .reader = reader };
+        }
 
         pub fn getBytes(self: Reader) capnp.Error!capnp.List(u8).Reader {
             return self.reader.readPtrField(capnp.List(u8).Reader, 0);
@@ -116,17 +144,30 @@ const ByteListHolder = struct {
     pub const Builder = struct {
         builder: capnp.Struct.Builder,
 
+        pub fn fromStructBuilder(builder: capnp.Struct.Builder) Builder {
+            return .{ .builder = builder };
+        }
+
         pub fn getBytes(self: Builder) capnp.List(u8).Builder {
             return self.builder.buildPtrField(capnp.List(u8).Builder, 0);
         }
     };
+
+    pub const struct_trait = capnp.StructTrait(@This()){
+        .data_words = 0,
+        .ptr_words = 1,
+        .reader = Reader.fromStructReader,
+        .builder = Builder.fromStructBuilder,
+    };
 };
 
 const Item = struct {
-    pub const _Metadata = capnp.StructMetadata{ .dataWords = 1, .ptrWords = 0 };
-
     pub const Reader = struct {
         reader: capnp.Struct.Reader,
+
+        pub fn fromStructReader(reader: capnp.Struct.Reader) Reader {
+            return .{ .reader = reader };
+        }
 
         pub fn getValue(self: Reader) u64 {
             return self.reader.readIntField(u64, 0);
@@ -136,65 +177,128 @@ const Item = struct {
     pub const Builder = struct {
         builder: capnp.Struct.Builder,
 
+        pub fn fromStructBuilder(builder: capnp.Struct.Builder) Builder {
+            return .{ .builder = builder };
+        }
+
         pub fn setValue(self: Builder, value: u64) void {
             self.builder.writeIntField(u64, 0, value);
         }
     };
+
+    pub const struct_trait = capnp.StructTrait(@This()){
+        .data_words = 1,
+        .ptr_words = 0,
+        .reader = Reader.fromStructReader,
+        .builder = Builder.fromStructBuilder,
+    };
 };
 
 const ItemListHolder = struct {
-    pub const _Metadata = capnp.StructMetadata{ .dataWords = 0, .ptrWords = 1 };
-
     pub const Reader = struct {
         reader: capnp.Struct.Reader,
 
-        pub fn getItems(self: Reader) capnp.Error!capnp.CompositeListReader(Item) {
-            return self.reader.readPtrField(capnp.CompositeListReader(Item), 0);
+        pub fn fromStructReader(reader: capnp.Struct.Reader) Reader {
+            return .{ .reader = reader };
+        }
+
+        pub fn getItems(self: Reader) capnp.Error!capnp.CompositeListReader(Item, Item.struct_trait) {
+            return self.reader.readPtrField(capnp.CompositeListReader(Item, Item.struct_trait), 0);
         }
     };
 
     pub const Builder = struct {
         builder: capnp.Struct.Builder,
 
-        pub fn getItems(self: Builder) capnp.CompositeListBuilder(Item) {
-            return self.builder.buildPtrField(capnp.CompositeListBuilder(Item), 0);
+        pub fn fromStructBuilder(builder: capnp.Struct.Builder) Builder {
+            return .{ .builder = builder };
         }
+
+        pub fn getItems(self: Builder) capnp.CompositeListBuilder(Item, Item.struct_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(Item, Item.struct_trait), 0);
+        }
+    };
+
+    pub const struct_trait = capnp.StructTrait(@This()){
+        .data_words = 0,
+        .ptr_words = 1,
+        .reader = Reader.fromStructReader,
+        .builder = Builder.fromStructBuilder,
     };
 };
 
 const Empty = struct {
-    pub const _Metadata = capnp.StructMetadata{ .dataWords = 0, .ptrWords = 0 };
-
     pub const Reader = struct {
         reader: capnp.Struct.Reader,
+
+        pub fn fromStructReader(reader: capnp.Struct.Reader) Reader {
+            return .{ .reader = reader };
+        }
     };
 
     pub const Builder = struct {
         builder: capnp.Struct.Builder,
+
+        pub fn fromStructBuilder(builder: capnp.Struct.Builder) Builder {
+            return .{ .builder = builder };
+        }
+    };
+
+    pub const struct_trait = capnp.StructTrait(@This()){
+        .data_words = 0,
+        .ptr_words = 0,
+        .reader = Reader.fromStructReader,
+        .builder = Builder.fromStructBuilder,
     };
 };
 
 const ZeroItem = struct {
-    pub const _Metadata = capnp.StructMetadata{ .dataWords = 0, .ptrWords = 0 };
-
     pub const Reader = struct {
         reader: capnp.Struct.Reader,
+
+        pub fn fromStructReader(reader: capnp.Struct.Reader) Reader {
+            return .{ .reader = reader };
+        }
     };
 
     pub const Builder = struct {
         builder: capnp.Struct.Builder,
+
+        pub fn fromStructBuilder(builder: capnp.Struct.Builder) Builder {
+            return .{ .builder = builder };
+        }
+    };
+
+    pub const struct_trait = capnp.StructTrait(@This()){
+        .data_words = 0,
+        .ptr_words = 0,
+        .reader = Reader.fromStructReader,
+        .builder = Builder.fromStructBuilder,
     };
 };
 
 const Dummy = struct {
-    pub const _Metadata = capnp.StructMetadata{ .dataWords = 0, .ptrWords = 0 };
-
     pub const Reader = struct {
         reader: capnp.Struct.Reader,
+
+        pub fn fromStructReader(reader: capnp.Struct.Reader) Reader {
+            return .{ .reader = reader };
+        }
     };
 
     pub const Builder = struct {
         builder: capnp.Struct.Builder,
+
+        pub fn fromStructBuilder(builder: capnp.Struct.Builder) Builder {
+            return .{ .builder = builder };
+        }
+    };
+
+    pub const struct_trait = capnp.StructTrait(@This()){
+        .data_words = 0,
+        .ptr_words = 0,
+        .reader = Reader.fromStructReader,
+        .builder = Builder.fromStructBuilder,
     };
 };
 
@@ -227,7 +331,7 @@ test "regression: writeBoolField preserves sibling bits" {
     try builder.init();
     defer builder.deinit();
 
-    var value = try builder.initRootStruct(OneWord);
+    var value = try builder.initRootStruct(OneWord, OneWord.struct_trait);
 
     value.builder.writeBoolField(0, true);
     value.builder.writeBoolField(1, true);
@@ -391,7 +495,7 @@ test "regression: zero-sized struct list counts elements against the traversal l
     var counter = capnp.Counter{ .limit = 16 };
     const s = try capnp.StructReader.fromReadContext(readContext(segments[0..], &counter));
 
-    try expectAnyError(s.readPtrField(capnp.CompositeListReader(ZeroItem), 0));
+    try expectAnyError(s.readPtrField(capnp.CompositeListReader(ZeroItem, ZeroItem.struct_trait), 0));
 }
 
 test "regression: text without a NUL terminator is rejected" {
@@ -506,7 +610,7 @@ test "regression: root struct larger than one segment must round-trip" {
     try builder.init();
     defer builder.deinit();
 
-    var value = try builder.initRootStruct(BigStruct);
+    var value = try builder.initRootStruct(BigStruct, BigStruct.struct_trait);
     value.setValue(0xdead_beef);
 
     var message = builder.toReader();
@@ -523,7 +627,7 @@ test "regression: root struct larger than one segment must round-trip" {
     try testing.expectEqual(@as(i30, 0), pad_ptr.struct_.offset_words);
     try testing.expectEqual(@as(u16, 9000), pad_ptr.struct_.data_words);
 
-    const reader = try message.getRootStruct(BigStruct);
+    const reader = try message.getRootStruct(BigStruct, BigStruct.struct_trait);
     try testing.expectEqual(@as(u64, 0xdead_beef), reader.getValue());
 }
 
@@ -533,12 +637,12 @@ test "regression: empty lists round-trip at the end of a segment" {
         try builder.init();
         defer builder.deinit();
 
-        var holder = try builder.initRootStruct(ByteListHolder);
+        var holder = try builder.initRootStruct(ByteListHolder, ByteListHolder.struct_trait);
         var bytes = holder.getBytes();
         try bytes.init(0);
 
         var message = builder.toReader();
-        const reader = try message.getRootStruct(ByteListHolder);
+        const reader = try message.getRootStruct(ByteListHolder, ByteListHolder.struct_trait);
         const list = try reader.getBytes();
         try testing.expectEqual(@as(u29, 0), list.length);
     }
@@ -548,12 +652,12 @@ test "regression: empty lists round-trip at the end of a segment" {
         try builder.init();
         defer builder.deinit();
 
-        var holder = try builder.initRootStruct(ItemListHolder);
+        var holder = try builder.initRootStruct(ItemListHolder, ItemListHolder.struct_trait);
         var items = holder.getItems();
         try items.init(0);
 
         var message = builder.toReader();
-        const reader = try message.getRootStruct(ItemListHolder);
+        const reader = try message.getRootStruct(ItemListHolder, ItemListHolder.struct_trait);
         const list = try reader.getItems();
         try testing.expectEqual(@as(u29, 0), list.length);
     }
@@ -564,7 +668,7 @@ test "regression: empty struct is encoded with offset -1" {
     try builder.init();
     defer builder.deinit();
 
-    _ = try builder.initRootStruct(Empty);
+    _ = try builder.initRootStruct(Empty, Empty.struct_trait);
 
     var message = builder.toReader();
     const root_ptr = capnp.Ptr.of_u64(std.mem.readInt(u64, message.segments[0][0..8], .little));
@@ -573,7 +677,7 @@ test "regression: empty struct is encoded with offset -1" {
     try testing.expectEqual(@as(u16, 0), root_ptr.struct_.data_words);
     try testing.expectEqual(@as(u16, 0), root_ptr.struct_.ptr_words);
 
-    const reader = try message.getRootStruct(Empty);
+    const reader = try message.getRootStruct(Empty, Empty.struct_trait);
     try testing.expectEqual(@as(u16, 0), reader.reader.data_words);
     try testing.expectEqual(@as(u16, 0), reader.reader.ptr_words);
 }
@@ -584,7 +688,7 @@ test "BUG: byte list that crosses a segment must round-trip" {
     defer builder.deinit();
 
     {
-        var holder = try builder.initRootStruct(ByteListHolder);
+        var holder = try builder.initRootStruct(ByteListHolder, ByteListHolder.struct_trait);
         var list = holder.getBytes();
         try list.init(100_000);
 
@@ -593,7 +697,7 @@ test "BUG: byte list that crosses a segment must round-trip" {
     }
 
     var message = builder.toReader();
-    const holder = try message.getRootStruct(ByteListHolder);
+    const holder = try message.getRootStruct(ByteListHolder, ByteListHolder.struct_trait);
     const list = try holder.getBytes();
 
     try testing.expectEqual(@as(u29, 100_000), list.length);
@@ -607,7 +711,7 @@ test "BUG: composite list that crosses a segment must round-trip" {
     defer builder.deinit();
 
     {
-        var holder = try builder.initRootStruct(ItemListHolder);
+        var holder = try builder.initRootStruct(ItemListHolder, ItemListHolder.struct_trait);
         var list = holder.getItems();
         try list.init(20_000); // 20k words, larger than segment 0
 
@@ -616,7 +720,7 @@ test "BUG: composite list that crosses a segment must round-trip" {
     }
 
     var message = builder.toReader();
-    const holder = try message.getRootStruct(ItemListHolder);
+    const holder = try message.getRootStruct(ItemListHolder, ItemListHolder.struct_trait);
     const list = try holder.getItems();
 
     try testing.expectEqual(@as(u29, 20_000), list.length);
@@ -632,11 +736,11 @@ test "BUG: initRootStruct must not silently write the root pointer at a non-zero
     // Occupy words 0..4. The root pointer normally has to live at word 0.
     _ = try builder.alloc(0, 4);
 
-    if (builder.initRootStruct(OneWord)) |value| {
+    if (builder.initRootStruct(OneWord, OneWord.struct_trait)) |value| {
         value.setValue(42);
 
         var message = builder.toReader();
-        const reader = try message.getRootStruct(OneWord);
+        const reader = try message.getRootStruct(OneWord, OneWord.struct_trait);
         try testing.expectEqual(@as(u64, 42), reader.getValue());
     } else |_| {
         // Refusing to create a root pointer after other allocations is fine.
@@ -842,7 +946,7 @@ test "BUG: composite list with a non-struct tag must be an error" {
     var counter = capnp.Counter{ .limit = 1000 };
     const s = try capnp.StructReader.fromReadContext(readContext(segments[0..], &counter));
 
-    try expectAnyError(s.readPtrField(capnp.CompositeListReader(Dummy), 0));
+    try expectAnyError(s.readPtrField(capnp.CompositeListReader(Dummy, Dummy.struct_trait), 0));
 }
 
 test "BUG: ListBuilder.init can be called twice without an error" {
@@ -850,7 +954,7 @@ test "BUG: ListBuilder.init can be called twice without an error" {
     try builder.init();
     defer builder.deinit();
 
-    var holder = try builder.initRootStruct(ByteListHolder);
+    var holder = try builder.initRootStruct(ByteListHolder, ByteListHolder.struct_trait);
     var list = holder.getBytes();
 
     try list.init(4);

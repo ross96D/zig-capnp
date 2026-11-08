@@ -454,6 +454,23 @@ pub const StructBuilder = struct {
     }
 };
 
+/// Compile-time contract for a generated Cap'n Proto struct type `T`.
+///
+/// This replaces the implicit `T._Metadata` and `.reader`/`.builder` field
+/// conventions with an explicit, compiler-checked value.
+pub fn StructTrait(comptime T: type) type {
+    return struct {
+        data_words: u16,
+        ptr_words: u16,
+
+        /// Wrap a raw wire reader in the generated type-safe reader.
+        reader: fn (StructReader) T.Reader,
+
+        /// Wrap a raw wire builder in the generated type-safe builder.
+        builder: fn (StructBuilder) T.Builder,
+    };
+}
+
 pub const Struct = struct {
     pub const Builder = StructBuilder;
     pub const Reader = StructReader;
@@ -512,11 +529,7 @@ pub fn ListReader(comptime T: type) type {
 pub fn ListBuilder(comptime T: type) type {
     return struct {
         const Self = @This();
-
-        ptr: BuildContext,
-        context: ?BuildContext,
-
-        element_size: u3 = switch (T) {
+        const element_size: u3 = switch (T) {
             void => 0,
             bool => 1,
             u8, i8 => 2,
@@ -524,7 +537,11 @@ pub fn ListBuilder(comptime T: type) type {
             u32, i32, f32 => 4,
             u64, i64, f64 => 5,
             else => unreachable,
-        },
+        };
+
+        ptr: BuildContext,
+        context: ?BuildContext,
+
         length: u29,
 
         pub fn fromBuildContext(ptr: BuildContext) Self {
@@ -575,22 +592,32 @@ pub fn ListBuilder(comptime T: type) type {
 
 pub fn List(comptime T: type) type {
     switch (@typeInfo(T)) {
-        .@"struct" => {
-            return struct {
-                pub const Builder = CompositeListBuilder(T);
-                pub const Reader = CompositeListReader(T);
-            };
-        },
-
+        .@"struct" => @compileError(
+            "struct element types need capnp.CompositeList(T, T.struct_trait)",
+        ),
         else => {},
     }
+
     return struct {
         pub const Builder = ListBuilder(T);
         pub const Reader = ListReader(T);
     };
 }
 
-pub fn CompositeListBuilder(comptime T: type) type {
+pub fn CompositeList(
+    comptime T: type,
+    comptime trait: StructTrait(T),
+) type {
+    return struct {
+        pub const Builder = CompositeListBuilder(T, trait);
+        pub const Reader = CompositeListReader(T, trait);
+    };
+}
+
+pub fn CompositeListBuilder(
+    comptime T: type,
+    comptime trait: StructTrait(T),
+) type {
     return struct {
         const Self = @This();
 
@@ -610,7 +637,7 @@ pub fn CompositeListBuilder(comptime T: type) type {
         pub fn init(self: *Self, length: u29) BuildError!void {
             if (self.length != 0) return Error.AlreadyInitialized;
 
-            const stride = @as(u32, T._Metadata.dataWords) + T._Metadata.ptrWords;
+            const stride = @as(u32, trait.data_words) + trait.ptr_words;
             const element_words = std.math.mul(u32, stride, length) catch return Error.MessageTooLarge;
             const payload_words = std.math.add(u32, 1, element_words) catch return Error.MessageTooLarge;
 
@@ -620,8 +647,8 @@ pub fn CompositeListBuilder(comptime T: type) type {
             var tag = object.content;
             tag.writePtr(Ptr{ .struct_ = .{
                 .offset_words = @intCast(length),
-                .data_words = T._Metadata.dataWords,
-                .ptr_words = T._Metadata.ptrWords,
+                .data_words = trait.data_words,
+                .ptr_words = trait.ptr_words,
             } });
 
             var elements = object.content;
@@ -639,17 +666,15 @@ pub fn CompositeListBuilder(comptime T: type) type {
         pub fn get(self: Self, ix: u32) T.Builder {
             std.debug.assert(ix < self.length);
             var _context = self.context.?;
-            const stride = @as(u64, T._Metadata.dataWords) + T._Metadata.ptrWords;
+            const stride = @as(u64, trait.data_words) + trait.ptr_words;
             // TODO this need improvement to avoid so much int cast
             _context.offset_words = @intCast(@as(u64, _context.offset_words) + stride * ix);
 
-            return T.Builder{
-                .builder = StructBuilder{
-                    .context = _context,
-                    .data_words = T._Metadata.dataWords,
-                    .ptr_words = T._Metadata.ptrWords,
-                },
-            };
+            return trait.builder(StructBuilder{
+                .context = _context,
+                .data_words = trait.data_words,
+                .ptr_words = trait.ptr_words,
+            });
         }
     };
 }
@@ -672,7 +697,10 @@ pub fn ListIterator(comptime T: type, comptime U: type) type {
     };
 }
 
-pub fn CompositeListReader(comptime T: type) type {
+pub fn CompositeListReader(
+    comptime T: type,
+    comptime trait: StructTrait(T),
+) type {
     return struct {
         const Self = @This();
 
@@ -746,13 +774,11 @@ pub fn CompositeListReader(comptime T: type) type {
             const stride = @as(u64, self.ptrWords) + self.dataWords;
             _context.offset_words = @intCast(@as(u64, _context.offset_words) + stride * ix);
 
-            return T.Reader{
-                .reader = StructReader{
-                    .context = _context,
-                    .data_words = self.dataWords,
-                    .ptr_words = self.ptrWords,
-                },
-            };
+            return trait.reader(StructReader{
+                .context = _context,
+                .data_words = self.dataWords,
+                .ptr_words = self.ptrWords,
+            });
         }
     };
 }
@@ -794,9 +820,9 @@ pub const Message = struct {
         allocator.free(self.segments);
     }
 
-    pub fn getRootStruct(self: *Message, comptime T: type) Error!T.Reader {
+    pub fn getRootStruct(self: *Message, comptime T: type, comptime trait: StructTrait(T)) Error!T.Reader {
         self.traversal_counter = Counter{ .limit = 8 * 1024 * 1024 };
-        return T.Reader{ .reader = try StructReader.fromReadContext(ReadContext.fromSegments(self.segments, &self.traversal_counter)) };
+        return trait.reader(try StructReader.fromReadContext(ReadContext.fromSegments(self.segments, &self.traversal_counter)));
     }
 };
 
@@ -857,11 +883,6 @@ pub const BuildContext = struct {
     pub fn relativeWords(self: *BuildContext, dx: i30) void {
         self.offset_words = @intCast(dx + self.offset_words);
     }
-};
-
-pub const StructMetadata = struct {
-    ptrWords: u16,
-    dataWords: u16,
 };
 
 const max_segment_bytes: u32 = (1 << 32) - 8;
@@ -1030,12 +1051,12 @@ pub const MessageBuilder = struct {
         return Message{ .segments = self.segments };
     }
 
-    pub fn initRootStruct(self: *MessageBuilder, comptime T: type) BuildError!T.Builder {
+    pub fn initRootStruct(self: *MessageBuilder, comptime T: type, comptime trait: StructTrait(T)) BuildError!T.Builder {
         if (self.segments.len != 1 or self.segments[0].len != 0) return Error.RootAlreadyInitialized;
 
         // The root pointer must be segment 0, word 0.
         var ctx = self.allocAssert(0, 8);
-        return T.Builder{ .builder = try ctx.allocStruct(T._Metadata.dataWords, T._Metadata.ptrWords) };
+        return trait.builder(try ctx.allocStruct(trait.data_words, trait.ptr_words));
     }
 };
 
