@@ -1,0 +1,9 @@
+pub const simple = @import("codegen-zig/generated_01_simple_struct.zig");
+pub const lists = @import("codegen-zig/generated_02_simple_lists.zig");
+pub const composite = @import("codegen-zig/generated_03_composite_lists.zig");
+pub const unions = @import("codegen-zig/generated_04_unions.zig");
+pub const defaults = @import("codegen-zig/generated_05_default_values.zig");
+pub const bits_floats = @import("codegen-zig/generated_07_bits_and_floats.zig");
+pub const schema_examples = @import("codegen-zig/generated_08-schema-examples.zig");
+pub const features = @import("codegen-zig/generated_09_codegen_features.zig");
+pub const groups = @import("codegen-zig/generated_10_groups.zig");

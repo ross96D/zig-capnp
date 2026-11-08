@@ -1,13 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-mkdir capnp-tests/codegen-request
+mkdir -p capnp-tests/codegen-request
 for f in capnp-tests/*.capnp; do
   name=$(basename "$f" .capnp)
   capnp compile -I/usr/local/include/capnp -o- "$f" > "capnp-tests/codegen-request/${name}.request.bin"
 done
 
-mkdir capnp-tests/codegen-zig
+mkdir -p capnp-tests/codegen-zig
 for f in capnp-tests/codegen-request/*.request.bin; do
   name=$(basename "$f" .request.bin)
   echo "generate capnp-tests/codegen-zig/generated_${name}.zig"

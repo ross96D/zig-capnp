@@ -56,7 +56,7 @@ pub fn build(b: *std.Build) void {
     const codegen_mod = b.createModule(.{
         .target = target,
         .optimize = optimize,
-        .root_source_file = b.path("capnp-tests/codegen-zig/codegen.zig"),
+        .root_source_file = b.path("capnp-tests/codegen.zig"),
         .imports = &.{
             .{ .name = "capnp", .module = capnp_mod },
         },
