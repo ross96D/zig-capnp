@@ -13,3 +13,5 @@ for f in capnp-tests/codegen-request/*.request.bin; do
   echo "generate capnp-tests/codegen-zig/generated_${name}.zig"
   ./zig-out/bin/capnpc-zig --stdout < "$f" > "capnp-tests/codegen-zig/generated_${name}.zig"
 done
+
+cp src/schema.zig capnp-tests/codegen-zig/schema.zig
