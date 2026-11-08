@@ -73,6 +73,16 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    const capnp_test_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/capnp_test.zig"),
+        .imports = &.{
+            .{ .name = "capnp", .module = capnp_mod },
+            .{ .name = "capnpc", .module = compiler_mod },
+        },
+    });
+
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const main_tests = b.addTest(.{
@@ -105,6 +115,16 @@ pub fn build(b: *std.Build) void {
 
     const run_codegen_tests = b.addRunArtifact(codegen_tests);
 
+    const capnp_test = b.addTest(.{
+        .root_module = capnp_test_mod,
+        .test_runner = .{
+            .mode = .simple,
+            .path = b.path("test_runner.zig"),
+        },
+    });
+
+    const run_capnp_test = b.addRunArtifact(capnp_test);
+
     // This creates a build step. It will be visible in the `zig build --help` menu,
     // and can be selected like this: `zig build test`
     // This will evaluate the `test` step rather than the default, which is "install".
@@ -112,4 +132,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_compiler_tests.step);
     test_step.dependOn(&run_codegen_tests.step);
+    test_step.dependOn(&run_capnp_test.step);
 }
