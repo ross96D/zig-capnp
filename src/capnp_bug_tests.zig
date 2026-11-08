@@ -162,6 +162,18 @@ const ItemListHolder = struct {
     };
 };
 
+const Empty = struct {
+    pub const _Metadata = capnp.StructMetadata{ .dataWords = 0, .ptrWords = 0 };
+
+    pub const Reader = struct {
+        reader: capnp.Struct.Reader,
+    };
+
+    pub const Builder = struct {
+        builder: capnp.Struct.Builder,
+    };
+};
+
 const Dummy = struct {
     pub const _Metadata = capnp.StructMetadata{ .dataWords = 0, .ptrWords = 0 };
 
@@ -406,7 +418,7 @@ test "regression: alloc rejects word counts larger than a segment" {
     try expectAnyError(builder.alloc(0, std.math.maxInt(u32)));
 }
 
-test "BUG: root struct larger than one segment must round-trip" {
+test "regression: root struct larger than one segment must round-trip" {
     var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
     try builder.init();
     defer builder.deinit();
@@ -415,8 +427,40 @@ test "BUG: root struct larger than one segment must round-trip" {
     value.setValue(0xdead_beef);
 
     var message = builder.toReader();
+
+    // The root pointer must be a single-far pointer to segment 1.
+    const root_ptr = capnp.Ptr.of_u64(std.mem.readInt(u64, message.segments[0][0..8], .little));
+    try testing.expect(root_ptr == .inter_segment);
+    try testing.expectEqual(false, root_ptr.inter_segment.double);
+    try testing.expectEqual(@as(u32, 1), root_ptr.inter_segment.segment);
+
+    // Segment 1 word 0 is the landing pad: a struct pointer with offset 0.
+    const pad_ptr = capnp.Ptr.of_u64(std.mem.readInt(u64, message.segments[1][0..8], .little));
+    try testing.expect(pad_ptr == .struct_);
+    try testing.expectEqual(@as(i30, 0), pad_ptr.struct_.offset_words);
+    try testing.expectEqual(@as(u16, 9000), pad_ptr.struct_.data_words);
+
     const reader = try message.getRootStruct(BigStruct);
     try testing.expectEqual(@as(u64, 0xdead_beef), reader.getValue());
+}
+
+test "regression: empty struct is encoded with offset -1" {
+    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
+    try builder.init();
+    defer builder.deinit();
+
+    _ = try builder.initRootStruct(Empty);
+
+    var message = builder.toReader();
+    const root_ptr = capnp.Ptr.of_u64(std.mem.readInt(u64, message.segments[0][0..8], .little));
+    try testing.expect(root_ptr == .struct_);
+    try testing.expectEqual(@as(i30, -1), root_ptr.struct_.offset_words);
+    try testing.expectEqual(@as(u16, 0), root_ptr.struct_.data_words);
+    try testing.expectEqual(@as(u16, 0), root_ptr.struct_.ptr_words);
+
+    const reader = try message.getRootStruct(Empty);
+    try testing.expectEqual(@as(u16, 0), reader.reader.data_words);
+    try testing.expectEqual(@as(u16, 0), reader.reader.ptr_words);
 }
 
 test "BUG: byte list that crosses a segment must round-trip" {

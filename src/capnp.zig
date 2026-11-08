@@ -392,11 +392,11 @@ pub const StructReader = struct {
 
 pub const StructBuilder = struct {
     context: BuildContext,
-    dataWords: u16,
-    ptrWords: u16,
+    data_words: u16,
+    ptr_words: u16,
 
     pub fn readIntField(self: StructBuilder, comptime T: type, offset: u32) T {
-        return self.context.readIntWithBound(T, offset, self.dataWords);
+        return self.context.readIntWithBound(T, offset, self.data_words);
     }
 
     pub fn writeIntField(self: StructBuilder, comptime T: type, offset: u32, value: T) void {
@@ -405,7 +405,7 @@ pub const StructBuilder = struct {
 
     pub fn buildPtrField(self: StructBuilder, comptime T: type, offset: u29) T {
         var ptr = self.context;
-        ptr.relativeWords(self.dataWords + offset);
+        ptr.relativeWords(self.data_words + offset);
         return T.fromBuildContext(ptr);
     }
 
@@ -545,7 +545,7 @@ pub fn ListBuilder(comptime T: type) type {
             self.context = try self.ptr.builder.alloc(self.ptr.segment, sizeInWords);
 
             std.debug.assert(self.context.?.segment == self.ptr.segment);
-            const offsetWords: i30 = @intCast(self.context.?.offsetWords - self.ptr.offsetWords - 1);
+            const offsetWords: i30 = @intCast(self.context.?.offset_words - self.ptr.offset_words - 1);
 
             self.length = length;
 
@@ -609,12 +609,12 @@ pub fn CompositeListBuilder(comptime T: type) type {
 
             var structPtr = try self.ptr.builder.alloc(self.ptr.segment, 1 + sizeInWords);
             self.context = structPtr;
-            self.context.?.offsetWords += 1;
+            self.context.?.offset_words += 1;
 
             structPtr.writePtr(Ptr{ .struct_ = .{ .offset_words = length, .data_words = T._Metadata.dataWords, .ptr_words = T._Metadata.ptrWords } });
 
             std.debug.assert(structPtr.segment == self.ptr.segment);
-            const offsetWords: i30 = @intCast(structPtr.offsetWords - self.ptr.offsetWords - 1);
+            const offsetWords: i30 = @intCast(structPtr.offset_words - self.ptr.offset_words - 1);
 
             self.length = length;
 
@@ -629,8 +629,8 @@ pub fn CompositeListBuilder(comptime T: type) type {
             return T.Builder{
                 .builder = StructBuilder{
                     .context = _context,
-                    .dataWords = T._Metadata.dataWords,
-                    .ptrWords = T._Metadata.ptrWords,
+                    .data_words = T._Metadata.dataWords,
+                    .ptr_words = T._Metadata.ptrWords,
                 },
             };
         }
@@ -780,10 +780,10 @@ pub const BuildContext = struct {
     builder: *MessageBuilder,
     segments: *[][]u8,
     segment: u32,
-    offsetWords: u29,
+    offset_words: u29,
 
     pub fn offsetBytes(self: BuildContext) u32 {
-        return self.offsetWords << 3;
+        return self.offset_words << 3;
     }
 
     pub fn readIntWithBound(self: BuildContext, comptime T: type, offset: u32, boundWords: u29) T {
@@ -806,29 +806,32 @@ pub const BuildContext = struct {
     }
 
     pub fn allocStruct(self: *BuildContext, dataWords: u16, ptrWords: u16) BuildError!StructBuilder {
-        const builderCtx = try self.builder.alloc(self.segment, ptrWords + dataWords);
-        if (builderCtx.segment != self.segment) {
-            self.writePtr(Ptr{
-                .inter_segment = .{
-                    .double = false,
-                    .offset = builderCtx.offsetWords,
-                    .segment = builderCtx.segment,
-                },
-            });
-        } else {
-            self.writePtr(Ptr{
-                .struct_ = .{
-                    .offset_words = builderCtx.offsetWords,
-                    .ptr_words = ptrWords,
-                    .data_words = dataWords,
-                },
-            });
+        if (dataWords == 0 and ptrWords == 0) {
+            // Offset -1 distinguishes an empty struct from a null pointer.
+            self.writePtr(Ptr{ .struct_ = .{
+                .offset_words = -1,
+                .data_words = 0,
+                .ptr_words = 0,
+            } });
+            return StructBuilder{ .context = self.*, .ptr_words = 0, .data_words = 0 };
         }
-        return StructBuilder{ .context = builderCtx, .ptrWords = ptrWords, .dataWords = dataWords };
+
+        const words = @as(u32, dataWords) + ptrWords;
+        const object = try self.builder.allocObject(self.*, words);
+
+        try writeObjectPointer(self, object, Ptr{
+            .struct_ = .{
+                .offset_words = 0,
+                .data_words = dataWords,
+                .ptr_words = ptrWords,
+            },
+        });
+
+        return StructBuilder{ .context = object.content, .ptr_words = ptrWords, .data_words = dataWords };
     }
 
     pub fn relativeWords(self: *BuildContext, dx: i30) void {
-        self.offsetWords = @intCast(dx + self.offsetWords);
+        self.offset_words = @intCast(dx + self.offset_words);
     }
 };
 
@@ -838,6 +841,47 @@ pub const StructMetadata = struct {
 };
 
 const max_segment_bytes: u32 = (1 << 32) - 8;
+
+const Object = struct {
+    tag: BuildContext,
+    content: BuildContext,
+    needs_far: bool,
+};
+
+fn writeObjectPointer(pointer: *BuildContext, object: Object, payload: Ptr) BuildError!void {
+    var p = payload;
+
+    if (!object.needs_far) {
+        const delta = @as(i64, object.content.offset_words) - @as(i64, pointer.offset_words) - 1;
+        if (delta < std.math.minInt(i30) or delta > std.math.maxInt(i30)) {
+            return Error.OffsetOverflow;
+        }
+        const offset: i30 = @intCast(delta);
+
+        switch (p) {
+            .struct_ => |*s| s.offset_words = offset,
+            .list => |*l| l.offset_words = offset,
+            else => unreachable,
+        }
+        pointer.writePtr(p);
+        return;
+    }
+
+    // The payload is immediately after the landing pad, so its offset is zero.
+    switch (p) {
+        .struct_ => |*s| s.offset_words = 0,
+        .list => |*l| l.offset_words = 0,
+        else => unreachable,
+    }
+
+    var tag = object.tag;
+    tag.writePtr(p);
+    pointer.writePtr(Ptr{ .inter_segment = .{
+        .double = false,
+        .offset = @intCast(object.tag.offset_words),
+        .segment = object.tag.segment,
+    } });
+}
 
 pub const MessageBuilder = struct {
     allocator: Allocator = std.heap.page_allocator,
@@ -882,7 +926,7 @@ pub const MessageBuilder = struct {
         defer self.segments[segment].len += bytes;
         const seg = self.segments[segment];
         @memset(seg.ptr[seg.len .. seg.len + bytes], 0);
-        return .{ .builder = self, .segments = &self.segments, .segment = segment, .offsetWords = @intCast(seg.len >> 3) };
+        return .{ .builder = self, .segments = &self.segments, .segment = segment, .offset_words = @intCast(seg.len >> 3) };
     }
 
     /// try to allocate in the given segment.
@@ -921,6 +965,36 @@ pub const MessageBuilder = struct {
         return self.allocAssert(best_ix, bytes);
     }
 
+    fn allocObject(self: *MessageBuilder, pointer: BuildContext, words: u32) BuildError!Object {
+        const bytes = std.math.mul(u32, words, 8) catch return Error.MessageTooLarge;
+        if (bytes > max_segment_bytes) return Error.MessageTooLarge;
+
+        // Prefer placing the object in the pointer's own segment.
+        if (pointer.segment < self.segments.len) {
+            const used: u64 = self.segments[pointer.segment].len;
+            if (used + bytes <= self.segmentCapacity(pointer.segment)) {
+                return .{
+                    .tag = pointer,
+                    .content = self.allocAssert(pointer.segment, bytes),
+                    .needs_far = false,
+                };
+            }
+        }
+
+        // Reserve [landing pad][payload] contiguously in another segment.
+        const padded_words = std.math.add(u32, words, 1) catch return Error.MessageTooLarge;
+        const start = try self.alloc(pointer.segment, padded_words);
+
+        var content = start;
+        content.offset_words += 1;
+
+        return .{
+            .tag = start,
+            .content = content,
+            .needs_far = true,
+        };
+    }
+
     pub fn deinit(self: *MessageBuilder) void {
         for (self.segments, 0..) |*segment, n| {
             segment.len = self.segmentCapacity(@as(u32, @intCast(n)));
@@ -947,28 +1021,28 @@ test "test MessageBuilder" {
     {
         const context = try builder.alloc(0, 1024);
         try std.testing.expectEqual(@as(u32, 0), context.segment);
-        try std.testing.expectEqual(@as(u32, 0), context.offsetWords);
+        try std.testing.expectEqual(@as(u32, 0), context.offset_words);
         try std.testing.expectEqual(@as(usize, 8192), context.segments.*[0].len);
     }
 
     {
         const context = try builder.alloc(0, 1024);
         try std.testing.expectEqual(@as(u32, 0), context.segment);
-        try std.testing.expectEqual(@as(u32, 1024), context.offsetWords);
+        try std.testing.expectEqual(@as(u32, 1024), context.offset_words);
         try std.testing.expectEqual(@as(usize, 16384), context.segments.*[0].len);
     }
 
     {
         const context = try builder.alloc(0, 8192 * 2);
         try std.testing.expectEqual(@as(u32, 1), context.segment);
-        try std.testing.expectEqual(@as(u32, 0), context.offsetWords);
+        try std.testing.expectEqual(@as(u32, 0), context.offset_words);
         try std.testing.expectEqual(@as(usize, 8192 * 2 * 8), context.segments.*[1].len);
     }
 
     {
         const context = try builder.alloc(1, 1024);
         try std.testing.expectEqual(@as(u32, 0), context.segment);
-        try std.testing.expectEqual(@as(u32, 2048), context.offsetWords);
+        try std.testing.expectEqual(@as(u32, 2048), context.offset_words);
         try std.testing.expectEqual(@as(usize, 8192 * 3), context.segments.*[0].len);
     }
 }
