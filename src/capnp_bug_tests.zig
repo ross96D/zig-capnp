@@ -87,10 +87,13 @@ const OneWord = struct {
         }
     };
 
-    pub const struct_trait = capnp.StructTrait(@This()){
+    pub const reader_trait = capnp.ReaderTrait(Reader){
+        .reader = Reader.fromStructReader,
+    };
+
+    pub const builder_trait = capnp.BuilderTrait(Builder){
         .data_words = 1,
         .ptr_words = 0,
-        .reader = Reader.fromStructReader,
         .builder = Builder.fromStructBuilder,
     };
 };
@@ -120,10 +123,13 @@ const BigStruct = struct {
         }
     };
 
-    pub const struct_trait = capnp.StructTrait(@This()){
+    pub const reader_trait = capnp.ReaderTrait(Reader){
+        .reader = Reader.fromStructReader,
+    };
+
+    pub const builder_trait = capnp.BuilderTrait(Builder){
         .data_words = 9000,
         .ptr_words = 0,
-        .reader = Reader.fromStructReader,
         .builder = Builder.fromStructBuilder,
     };
 };
@@ -153,10 +159,13 @@ const ByteListHolder = struct {
         }
     };
 
-    pub const struct_trait = capnp.StructTrait(@This()){
+    pub const reader_trait = capnp.ReaderTrait(Reader){
+        .reader = Reader.fromStructReader,
+    };
+
+    pub const builder_trait = capnp.BuilderTrait(Builder){
         .data_words = 0,
         .ptr_words = 1,
-        .reader = Reader.fromStructReader,
         .builder = Builder.fromStructBuilder,
     };
 };
@@ -186,10 +195,13 @@ const Item = struct {
         }
     };
 
-    pub const struct_trait = capnp.StructTrait(@This()){
+    pub const reader_trait = capnp.ReaderTrait(Reader){
+        .reader = Reader.fromStructReader,
+    };
+
+    pub const builder_trait = capnp.BuilderTrait(Builder){
         .data_words = 1,
         .ptr_words = 0,
-        .reader = Reader.fromStructReader,
         .builder = Builder.fromStructBuilder,
     };
 };
@@ -202,8 +214,8 @@ const ItemListHolder = struct {
             return .{ .reader = reader };
         }
 
-        pub fn getItems(self: Reader) capnp.Error!capnp.CompositeListReader(Item, Item.struct_trait) {
-            return self.reader.readPtrField(capnp.CompositeListReader(Item, Item.struct_trait), 0);
+        pub fn getItems(self: Reader) capnp.Error!capnp.CompositeListReader(Item.Reader, Item.reader_trait) {
+            return self.reader.readPtrField(capnp.CompositeListReader(Item.Reader, Item.reader_trait), 0);
         }
     };
 
@@ -214,15 +226,18 @@ const ItemListHolder = struct {
             return .{ .builder = builder };
         }
 
-        pub fn getItems(self: Builder) capnp.CompositeListBuilder(Item, Item.struct_trait) {
-            return self.builder.buildPtrField(capnp.CompositeListBuilder(Item, Item.struct_trait), 0);
+        pub fn getItems(self: Builder) capnp.CompositeListBuilder(Item.Builder, Item.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(Item.Builder, Item.builder_trait), 0);
         }
     };
 
-    pub const struct_trait = capnp.StructTrait(@This()){
+    pub const reader_trait = capnp.ReaderTrait(Reader){
+        .reader = Reader.fromStructReader,
+    };
+
+    pub const builder_trait = capnp.BuilderTrait(Builder){
         .data_words = 0,
         .ptr_words = 1,
-        .reader = Reader.fromStructReader,
         .builder = Builder.fromStructBuilder,
     };
 };
@@ -244,10 +259,13 @@ const Empty = struct {
         }
     };
 
-    pub const struct_trait = capnp.StructTrait(@This()){
+    pub const reader_trait = capnp.ReaderTrait(Reader){
+        .reader = Reader.fromStructReader,
+    };
+
+    pub const builder_trait = capnp.BuilderTrait(Builder){
         .data_words = 0,
         .ptr_words = 0,
-        .reader = Reader.fromStructReader,
         .builder = Builder.fromStructBuilder,
     };
 };
@@ -269,10 +287,13 @@ const ZeroItem = struct {
         }
     };
 
-    pub const struct_trait = capnp.StructTrait(@This()){
+    pub const reader_trait = capnp.ReaderTrait(Reader){
+        .reader = Reader.fromStructReader,
+    };
+
+    pub const builder_trait = capnp.BuilderTrait(Builder){
         .data_words = 0,
         .ptr_words = 0,
-        .reader = Reader.fromStructReader,
         .builder = Builder.fromStructBuilder,
     };
 };
@@ -294,10 +315,13 @@ const Dummy = struct {
         }
     };
 
-    pub const struct_trait = capnp.StructTrait(@This()){
+    pub const reader_trait = capnp.ReaderTrait(Reader){
+        .reader = Reader.fromStructReader,
+    };
+
+    pub const builder_trait = capnp.BuilderTrait(Builder){
         .data_words = 0,
         .ptr_words = 0,
-        .reader = Reader.fromStructReader,
         .builder = Builder.fromStructBuilder,
     };
 };
@@ -331,7 +355,7 @@ test "regression: writeBoolField preserves sibling bits" {
     try builder.init();
     defer builder.deinit();
 
-    var value = try builder.initRootStruct(OneWord, OneWord.struct_trait);
+    var value = try builder.initRootStruct(OneWord.Builder, OneWord.builder_trait);
 
     value.builder.writeBoolField(0, true);
     value.builder.writeBoolField(1, true);
@@ -495,7 +519,7 @@ test "regression: zero-sized struct list counts elements against the traversal l
     var counter = capnp.Counter{ .limit = 16 };
     const s = try capnp.StructReader.fromReadContext(readContext(segments[0..], &counter));
 
-    try expectAnyError(s.readPtrField(capnp.CompositeListReader(ZeroItem, ZeroItem.struct_trait), 0));
+    try expectAnyError(s.readPtrField(capnp.CompositeListReader(ZeroItem.Reader, ZeroItem.reader_trait), 0));
 }
 
 test "regression: text without a NUL terminator is rejected" {
@@ -610,7 +634,7 @@ test "regression: root struct larger than one segment must round-trip" {
     try builder.init();
     defer builder.deinit();
 
-    var value = try builder.initRootStruct(BigStruct, BigStruct.struct_trait);
+    var value = try builder.initRootStruct(BigStruct.Builder, BigStruct.builder_trait);
     value.setValue(0xdead_beef);
 
     var message = builder.toReader();
@@ -627,7 +651,7 @@ test "regression: root struct larger than one segment must round-trip" {
     try testing.expectEqual(@as(i30, 0), pad_ptr.struct_.offset_words);
     try testing.expectEqual(@as(u16, 9000), pad_ptr.struct_.data_words);
 
-    const reader = try message.getRootStruct(BigStruct, BigStruct.struct_trait);
+    const reader = try message.getRootStruct(BigStruct.Reader, BigStruct.reader_trait);
     try testing.expectEqual(@as(u64, 0xdead_beef), reader.getValue());
 }
 
@@ -637,12 +661,12 @@ test "regression: empty lists round-trip at the end of a segment" {
         try builder.init();
         defer builder.deinit();
 
-        var holder = try builder.initRootStruct(ByteListHolder, ByteListHolder.struct_trait);
+        var holder = try builder.initRootStruct(ByteListHolder.Builder, ByteListHolder.builder_trait);
         var bytes = holder.getBytes();
         try bytes.init(0);
 
         var message = builder.toReader();
-        const reader = try message.getRootStruct(ByteListHolder, ByteListHolder.struct_trait);
+        const reader = try message.getRootStruct(ByteListHolder.Reader, ByteListHolder.reader_trait);
         const list = try reader.getBytes();
         try testing.expectEqual(@as(u29, 0), list.length);
     }
@@ -652,12 +676,12 @@ test "regression: empty lists round-trip at the end of a segment" {
         try builder.init();
         defer builder.deinit();
 
-        var holder = try builder.initRootStruct(ItemListHolder, ItemListHolder.struct_trait);
+        var holder = try builder.initRootStruct(ItemListHolder.Builder, ItemListHolder.builder_trait);
         var items = holder.getItems();
         try items.init(0);
 
         var message = builder.toReader();
-        const reader = try message.getRootStruct(ItemListHolder, ItemListHolder.struct_trait);
+        const reader = try message.getRootStruct(ItemListHolder.Reader, ItemListHolder.reader_trait);
         const list = try reader.getItems();
         try testing.expectEqual(@as(u29, 0), list.length);
     }
@@ -668,7 +692,7 @@ test "regression: empty struct is encoded with offset -1" {
     try builder.init();
     defer builder.deinit();
 
-    _ = try builder.initRootStruct(Empty, Empty.struct_trait);
+    _ = try builder.initRootStruct(Empty.Builder, Empty.builder_trait);
 
     var message = builder.toReader();
     const root_ptr = capnp.Ptr.of_u64(std.mem.readInt(u64, message.segments[0][0..8], .little));
@@ -677,7 +701,7 @@ test "regression: empty struct is encoded with offset -1" {
     try testing.expectEqual(@as(u16, 0), root_ptr.struct_.data_words);
     try testing.expectEqual(@as(u16, 0), root_ptr.struct_.ptr_words);
 
-    const reader = try message.getRootStruct(Empty, Empty.struct_trait);
+    const reader = try message.getRootStruct(Empty.Reader, Empty.reader_trait);
     try testing.expectEqual(@as(u16, 0), reader.reader.data_words);
     try testing.expectEqual(@as(u16, 0), reader.reader.ptr_words);
 }
@@ -688,7 +712,7 @@ test "BUG: byte list that crosses a segment must round-trip" {
     defer builder.deinit();
 
     {
-        var holder = try builder.initRootStruct(ByteListHolder, ByteListHolder.struct_trait);
+        var holder = try builder.initRootStruct(ByteListHolder.Builder, ByteListHolder.builder_trait);
         var list = holder.getBytes();
         try list.init(100_000);
 
@@ -697,7 +721,7 @@ test "BUG: byte list that crosses a segment must round-trip" {
     }
 
     var message = builder.toReader();
-    const holder = try message.getRootStruct(ByteListHolder, ByteListHolder.struct_trait);
+    const holder = try message.getRootStruct(ByteListHolder.Reader, ByteListHolder.reader_trait);
     const list = try holder.getBytes();
 
     try testing.expectEqual(@as(u29, 100_000), list.length);
@@ -711,7 +735,7 @@ test "BUG: composite list that crosses a segment must round-trip" {
     defer builder.deinit();
 
     {
-        var holder = try builder.initRootStruct(ItemListHolder, ItemListHolder.struct_trait);
+        var holder = try builder.initRootStruct(ItemListHolder.Builder, ItemListHolder.builder_trait);
         var list = holder.getItems();
         try list.init(20_000); // 20k words, larger than segment 0
 
@@ -720,7 +744,7 @@ test "BUG: composite list that crosses a segment must round-trip" {
     }
 
     var message = builder.toReader();
-    const holder = try message.getRootStruct(ItemListHolder, ItemListHolder.struct_trait);
+    const holder = try message.getRootStruct(ItemListHolder.Reader, ItemListHolder.reader_trait);
     const list = try holder.getItems();
 
     try testing.expectEqual(@as(u29, 20_000), list.length);
@@ -736,11 +760,11 @@ test "BUG: initRootStruct must not silently write the root pointer at a non-zero
     // Occupy words 0..4. The root pointer normally has to live at word 0.
     _ = try builder.alloc(0, 4);
 
-    if (builder.initRootStruct(OneWord, OneWord.struct_trait)) |value| {
+    if (builder.initRootStruct(OneWord.Builder, OneWord.builder_trait)) |value| {
         value.setValue(42);
 
         var message = builder.toReader();
-        const reader = try message.getRootStruct(OneWord, OneWord.struct_trait);
+        const reader = try message.getRootStruct(OneWord.Reader, OneWord.reader_trait);
         try testing.expectEqual(@as(u64, 42), reader.getValue());
     } else |_| {
         // Refusing to create a root pointer after other allocations is fine.
@@ -946,7 +970,7 @@ test "BUG: composite list with a non-struct tag must be an error" {
     var counter = capnp.Counter{ .limit = 1000 };
     const s = try capnp.StructReader.fromReadContext(readContext(segments[0..], &counter));
 
-    try expectAnyError(s.readPtrField(capnp.CompositeListReader(Dummy, Dummy.struct_trait), 0));
+    try expectAnyError(s.readPtrField(capnp.CompositeListReader(Dummy.Reader, Dummy.reader_trait), 0));
 }
 
 test "BUG: ListBuilder.init can be called twice without an error" {
@@ -954,7 +978,7 @@ test "BUG: ListBuilder.init can be called twice without an error" {
     try builder.init();
     defer builder.deinit();
 
-    var holder = try builder.initRootStruct(ByteListHolder, ByteListHolder.struct_trait);
+    var holder = try builder.initRootStruct(ByteListHolder.Builder, ByteListHolder.builder_trait);
     var list = holder.getBytes();
 
     try list.init(4);

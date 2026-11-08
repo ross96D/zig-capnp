@@ -470,17 +470,22 @@ pub const StructBuilder = struct {
     }
 };
 
-/// Compile-time contract for a generated Cap'n Proto struct type `T`.
-pub fn StructTrait(comptime T: type) type {
+/// Compile-time contract for a generated Cap'n Proto reader type `T`.
+pub fn ReaderTrait(comptime T: type) type {
+    return struct {
+        /// Wrap a raw wire reader in the generated type-safe reader.
+        reader: fn (StructReader) T,
+    };
+}
+
+/// Compile-time contract for a generated Cap'n Proto builder type `T`.
+pub fn BuilderTrait(comptime T: type) type {
     return struct {
         data_words: u16,
         ptr_words: u16,
 
-        /// Wrap a raw wire reader in the generated type-safe reader.
-        reader: fn (StructReader) T.Reader,
-
         /// Wrap a raw wire builder in the generated type-safe builder.
-        builder: fn (StructBuilder) T.Builder,
+        builder: fn (StructBuilder) T,
     };
 }
 
@@ -611,7 +616,7 @@ pub fn ListBuilder(comptime T: type) type {
 pub fn List(comptime T: type) type {
     switch (@typeInfo(T)) {
         .@"struct" => @compileError(
-            "struct element types need capnp.CompositeList(T, T.struct_trait)",
+            "struct element types need capnp.CompositeListReader or capnp.CompositeListBuilder",
         ),
         else => {},
     }
@@ -622,19 +627,9 @@ pub fn List(comptime T: type) type {
     };
 }
 
-pub fn CompositeList(
-    comptime T: type,
-    comptime trait: StructTrait(T),
-) type {
-    return struct {
-        pub const Builder = CompositeListBuilder(T, trait);
-        pub const Reader = CompositeListReader(T, trait);
-    };
-}
-
 pub fn CompositeListBuilder(
     comptime T: type,
-    comptime trait: StructTrait(T),
+    comptime trait: BuilderTrait(T),
 ) type {
     return struct {
         const Self = @This();
@@ -681,7 +676,7 @@ pub fn CompositeListBuilder(
             } });
         }
 
-        pub fn get(self: Self, ix: u32) T.Builder {
+        pub fn get(self: Self, ix: u32) T {
             std.debug.assert(ix < self.length);
             var _context = self.context.?;
             const stride = @as(u64, trait.data_words) + trait.ptr_words;
@@ -717,7 +712,7 @@ pub fn ListIterator(comptime T: type, comptime U: type) type {
 
 pub fn CompositeListReader(
     comptime T: type,
-    comptime trait: StructTrait(T),
+    comptime trait: ReaderTrait(T),
 ) type {
     return struct {
         const Self = @This();
@@ -778,14 +773,14 @@ pub fn CompositeListReader(
             return Self.empty;
         }
 
-        pub fn iter(self: Self) ListIterator(Self, T.Reader) {
-            return ListIterator(Self, T.Reader){
+        pub fn iter(self: Self) ListIterator(Self, T) {
+            return ListIterator(Self, T){
                 .reader = self,
                 .ix = 0,
             };
         }
 
-        pub fn get(self: Self, ix: u32) T.Reader {
+        pub fn get(self: Self, ix: u32) T {
             std.debug.assert(ix < self.length);
 
             var _context = self.context.?;
@@ -837,7 +832,7 @@ pub const Message = struct {
         allocator.free(self.segments);
     }
 
-    pub fn getRootStruct(self: *Message, comptime T: type, comptime trait: StructTrait(T)) Error!T.Reader {
+    pub fn getRootStruct(self: *Message, comptime T: type, comptime trait: ReaderTrait(T)) Error!T {
         self.traversal_counter = Counter{ .limit = 8 * 1024 * 1024 };
         return trait.reader(try StructReader.fromReadContext(ReadContext.fromSegments(self.segments, &self.traversal_counter)));
     }
@@ -1068,7 +1063,7 @@ pub const MessageBuilder = struct {
         return Message{ .segments = self.segments };
     }
 
-    pub fn initRootStruct(self: *MessageBuilder, comptime T: type, comptime trait: StructTrait(T)) BuildError!T.Builder {
+    pub fn initRootStruct(self: *MessageBuilder, comptime T: type, comptime trait: BuilderTrait(T)) BuildError!T {
         if (self.segments.len != 1 or self.segments[0].len != 0) return Error.RootAlreadyInitialized;
 
         // The root pointer must be segment 0, word 0.
