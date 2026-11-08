@@ -76,7 +76,7 @@ pub fn build(b: *std.Build) void {
     const capnp_test_mod = b.createModule(.{
         .target = target,
         .optimize = optimize,
-        .root_source_file = b.path("src/capnp_test.zig"),
+        .root_source_file = b.path("src/capnp_tests.zig"),
         .imports = &.{
             .{ .name = "capnp", .module = capnp_mod },
             .{ .name = "capnpc", .module = compiler_mod },

@@ -38,30 +38,66 @@ pub const Node = struct {
                 return @This().fromStructReader(capnp.StructReader.fromNull(context));
             }
 
+            /// Size of the data section, in words.
             pub fn dataWordCount(self: @This()) u16 {
                 return self.reader.readIntField(u16, 7) ^ 0;
             }
 
+            /// Size of the pointer section, in pointers (which are one word each).
             pub fn pointerCount(self: @This()) u16 {
                 return self.reader.readIntField(u16, 12) ^ 0;
             }
 
+            /// The preferred element size to use when encoding a list of this struct.  If this is anything
+            /// other than `inlineComposite` then the struct is one word or less in size and is a candidate
+            /// for list packing optimization.
             pub fn preferredListEncoding(self: @This()) _Root.ElementSize {
                 return @fromBackingInt(@intCast(self.reader.readIntField(u16, 13) ^ 0));
             }
 
+            /// If true, then this "struct" node is actually not an independent node, but merely represents
+            /// some named union or group within a particular parent struct.  This node's scopeId refers
+            /// to the parent struct, which may itself be a union/group in yet another struct.
+            ///
+            /// All group nodes share the same dataWordCount and pointerCount as the top-level
+            /// struct, and their fields live in the same ordinal and offset spaces as all other fields in
+            /// the struct.
+            ///
+            /// Note that a named union is considered a special kind of group -- in fact, a named union
+            /// is exactly equivalent to a group that contains nothing but an unnamed union.
             pub fn isGroup(self: @This()) bool {
                 return self.reader.readBoolField(224) != false;
             }
 
+            /// Number of fields in this struct which are members of an anonymous union, and thus may
+            /// overlap.  If this is non-zero, then a 16-bit discriminant is present indicating which
+            /// of the overlapping fields is active.  This can never be 1 -- if it is non-zero, it must be
+            /// two or more.
+            ///
+            /// Note that the fields of an unnamed union are considered fields of the scope containing the
+            /// union -- an unnamed union is not its own group.  So, a top-level struct may contain a
+            /// non-zero discriminant count.  Named unions, on the other hand, are equivalent to groups
+            /// containing unnamed unions.  So, a named union has its own independent schema node, with
+            /// `isGroup` = true.
             pub fn discriminantCount(self: @This()) u16 {
                 return self.reader.readIntField(u16, 15) ^ 0;
             }
 
+            /// If `discriminantCount` is non-zero, this is the offset of the union discriminant, in
+            /// multiples of 16 bits.
             pub fn discriminantOffset(self: @This()) u32 {
                 return self.reader.readIntField(u32, 8) ^ 0;
             }
 
+            /// Fields defined within this scope (either the struct's top-level fields, or the fields of
+            /// a particular group; see `isGroup`).
+            ///
+            /// The fields are sorted by ordinal number, but note that because groups share the same
+            /// ordinal space, the field's index in this list is not necessarily exactly its ordinal.
+            /// On the other hand, the field's position in this list does remain the same even as the
+            /// protocol evolves, since it is not possible to insert or remove an earlier ordinal.
+            /// Therefore, for most use cases, if you want to identify a field by number, it may make the
+            /// most sense to use the field's index in this list rather than its ordinal.
             pub fn fields(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Field.Reader, _Root.Field.reader_trait) {
                 return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Field.Reader, _Root.Field.reader_trait), 3);
             }
@@ -78,6 +114,7 @@ pub const Node = struct {
                 return .{ .builder = builder };
             }
 
+            /// Size of the data section, in words.
             pub fn dataWordCount(self: @This()) u16 {
                 return self.builder.readIntField(u16, 7) ^ 0;
             }
@@ -86,6 +123,7 @@ pub const Node = struct {
                 self.builder.writeIntField(u16, 7, v ^ 0);
             }
 
+            /// Size of the pointer section, in pointers (which are one word each).
             pub fn pointerCount(self: @This()) u16 {
                 return self.builder.readIntField(u16, 12) ^ 0;
             }
@@ -94,6 +132,9 @@ pub const Node = struct {
                 self.builder.writeIntField(u16, 12, v ^ 0);
             }
 
+            /// The preferred element size to use when encoding a list of this struct.  If this is anything
+            /// other than `inlineComposite` then the struct is one word or less in size and is a candidate
+            /// for list packing optimization.
             pub fn preferredListEncoding(self: @This()) _Root.ElementSize {
                 return @fromBackingInt(@intCast(self.builder.readIntField(u16, 13) ^ 0));
             }
@@ -102,6 +143,16 @@ pub const Node = struct {
                 self.builder.writeIntField(u16, 13, @intCast(@backingInt(v) ^ 0));
             }
 
+            /// If true, then this "struct" node is actually not an independent node, but merely represents
+            /// some named union or group within a particular parent struct.  This node's scopeId refers
+            /// to the parent struct, which may itself be a union/group in yet another struct.
+            ///
+            /// All group nodes share the same dataWordCount and pointerCount as the top-level
+            /// struct, and their fields live in the same ordinal and offset spaces as all other fields in
+            /// the struct.
+            ///
+            /// Note that a named union is considered a special kind of group -- in fact, a named union
+            /// is exactly equivalent to a group that contains nothing but an unnamed union.
             pub fn isGroup(self: @This()) bool {
                 return self.builder.readBoolField(224) != false;
             }
@@ -110,6 +161,16 @@ pub const Node = struct {
                 self.builder.writeBoolField(224, v != false);
             }
 
+            /// Number of fields in this struct which are members of an anonymous union, and thus may
+            /// overlap.  If this is non-zero, then a 16-bit discriminant is present indicating which
+            /// of the overlapping fields is active.  This can never be 1 -- if it is non-zero, it must be
+            /// two or more.
+            ///
+            /// Note that the fields of an unnamed union are considered fields of the scope containing the
+            /// union -- an unnamed union is not its own group.  So, a top-level struct may contain a
+            /// non-zero discriminant count.  Named unions, on the other hand, are equivalent to groups
+            /// containing unnamed unions.  So, a named union has its own independent schema node, with
+            /// `isGroup` = true.
             pub fn discriminantCount(self: @This()) u16 {
                 return self.builder.readIntField(u16, 15) ^ 0;
             }
@@ -118,6 +179,8 @@ pub const Node = struct {
                 self.builder.writeIntField(u16, 15, v ^ 0);
             }
 
+            /// If `discriminantCount` is non-zero, this is the offset of the union discriminant, in
+            /// multiples of 16 bits.
             pub fn discriminantOffset(self: @This()) u32 {
                 return self.builder.readIntField(u32, 8) ^ 0;
             }
@@ -126,6 +189,15 @@ pub const Node = struct {
                 self.builder.writeIntField(u32, 8, v ^ 0);
             }
 
+            /// Fields defined within this scope (either the struct's top-level fields, or the fields of
+            /// a particular group; see `isGroup`).
+            ///
+            /// The fields are sorted by ordinal number, but note that because groups share the same
+            /// ordinal space, the field's index in this list is not necessarily exactly its ordinal.
+            /// On the other hand, the field's position in this list does remain the same even as the
+            /// protocol evolves, since it is not possible to insert or remove an earlier ordinal.
+            /// Therefore, for most use cases, if you want to identify a field by number, it may make the
+            /// most sense to use the field's index in this list rather than its ordinal.
             pub fn fields(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Field.Builder, _Root.Field.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Field.Builder, _Root.Field.builder_trait), 3);
             }
@@ -156,6 +228,7 @@ pub const Node = struct {
                 return @This().fromStructReader(capnp.StructReader.fromNull(context));
             }
 
+            /// Enumerants ordered by numeric value (ordinal).
             pub fn enumerants(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Enumerant.Reader, _Root.Enumerant.reader_trait) {
                 return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Enumerant.Reader, _Root.Enumerant.reader_trait), 3);
             }
@@ -172,6 +245,7 @@ pub const Node = struct {
                 return .{ .builder = builder };
             }
 
+            /// Enumerants ordered by numeric value (ordinal).
             pub fn enumerants(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Enumerant.Builder, _Root.Enumerant.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Enumerant.Builder, _Root.Enumerant.builder_trait), 3);
             }
@@ -202,10 +276,12 @@ pub const Node = struct {
                 return @This().fromStructReader(capnp.StructReader.fromNull(context));
             }
 
+            /// Methods ordered by ordinal.
             pub fn methods(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Method.Reader, _Root.Method.reader_trait) {
                 return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Method.Reader, _Root.Method.reader_trait), 3);
             }
 
+            /// Superclasses of this interface.
             pub fn superclasses(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Superclass.Reader, _Root.Superclass.reader_trait) {
                 return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Superclass.Reader, _Root.Superclass.reader_trait), 4);
             }
@@ -222,10 +298,12 @@ pub const Node = struct {
                 return .{ .builder = builder };
             }
 
+            /// Methods ordered by ordinal.
             pub fn methods(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Method.Builder, _Root.Method.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Method.Builder, _Root.Method.builder_trait), 3);
             }
 
+            /// Superclasses of this interface.
             pub fn superclasses(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Superclass.Builder, _Root.Superclass.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Superclass.Builder, _Root.Superclass.builder_trait), 4);
             }
@@ -482,6 +560,7 @@ pub const Node = struct {
         };
     };
 
+    /// Information about one of the node's parameters.
     pub const Parameter = struct {
         pub const id: u64 = 0xb9521bccf10fa3b1;
 
@@ -550,10 +629,15 @@ pub const Node = struct {
                 return @This().fromStructReader(capnp.StructReader.fromNull(context));
             }
 
+            /// Unqualified symbol name.  Unlike Node.displayName, this *can* be used programmatically.
+            ///
+            /// (On Zooko's triangle, this is the node's petname according to its parent scope.)
             pub fn name(self: @This()) capnp.Error![:0]const u8 {
                 return try self.reader.readStringField(0);
             }
 
+            /// ID of the nested node.  Typically, the target node's scopeId points back to this node, but
+            /// robust code should avoid relying on this.
             pub fn id(self: @This()) u64 {
                 return self.reader.readIntField(u64, 0) ^ 0;
             }
@@ -570,6 +654,9 @@ pub const Node = struct {
                 return .{ .builder = builder };
             }
 
+            /// Unqualified symbol name.  Unlike Node.displayName, this *can* be used programmatically.
+            ///
+            /// (On Zooko's triangle, this is the node's petname according to its parent scope.)
             pub fn name(self: @This()) capnp.BuildError![:0]const u8 {
                 return try self.builder.readStringField(0);
             }
@@ -578,6 +665,8 @@ pub const Node = struct {
                 try self.builder.writeStringField(0, v);
             }
 
+            /// ID of the nested node.  Typically, the target node's scopeId points back to this node, but
+            /// robust code should avoid relying on this.
             pub fn id(self: @This()) u64 {
                 return self.builder.readIntField(u64, 0) ^ 0;
             }
@@ -594,6 +683,10 @@ pub const Node = struct {
         };
     };
 
+    /// Additional information about a node which is not needed at runtime, but may be useful for
+    /// documentation or debugging purposes. This is kept in a separate struct to make sure it
+    /// doesn't accidentally get included in contexts where it is not needed. The
+    /// `CodeGeneratorRequest` includes this information in a separate array.
     pub const SourceInfo = struct {
         pub const id: u64 = 0xf38e1de3041357ae;
 
@@ -615,6 +708,7 @@ pub const Node = struct {
                     return @This().fromStructReader(capnp.StructReader.fromNull(context));
                 }
 
+                /// Doc comment on the member.
                 pub fn docComment(self: @This()) capnp.Error![:0]const u8 {
                     return try self.reader.readStringField(0);
                 }
@@ -631,6 +725,7 @@ pub const Node = struct {
                     return .{ .builder = builder };
                 }
 
+                /// Doc comment on the member.
                 pub fn docComment(self: @This()) capnp.BuildError![:0]const u8 {
                     return try self.builder.readStringField(0);
                 }
@@ -662,14 +757,21 @@ pub const Node = struct {
                 return @This().fromStructReader(capnp.StructReader.fromNull(context));
             }
 
+            /// ID of the Node which this info describes.
             pub fn id(self: @This()) u64 {
                 return self.reader.readIntField(u64, 0) ^ 0;
             }
 
+            /// The top-level doc comment for the Node.
             pub fn docComment(self: @This()) capnp.Error![:0]const u8 {
                 return try self.reader.readStringField(0);
             }
 
+            /// Information about each member -- i.e. fields (for structs), enumerants (for enums), or
+            /// methods (for interfaces).
+            ///
+            /// This list is the same length and order as the corresponding list in the Node, i.e.
+            /// Node.struct.fields, Node.enum.enumerants, or Node.interface.methods.
             pub fn members(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Node.SourceInfo.Member.Reader, _Root.Node.SourceInfo.Member.reader_trait) {
                 return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Node.SourceInfo.Member.Reader, _Root.Node.SourceInfo.Member.reader_trait), 1);
             }
@@ -694,6 +796,7 @@ pub const Node = struct {
                 return .{ .builder = builder };
             }
 
+            /// ID of the Node which this info describes.
             pub fn id(self: @This()) u64 {
                 return self.builder.readIntField(u64, 0) ^ 0;
             }
@@ -702,6 +805,7 @@ pub const Node = struct {
                 self.builder.writeIntField(u64, 0, v ^ 0);
             }
 
+            /// The top-level doc comment for the Node.
             pub fn docComment(self: @This()) capnp.BuildError![:0]const u8 {
                 return try self.builder.readStringField(0);
             }
@@ -710,6 +814,11 @@ pub const Node = struct {
                 try self.builder.writeStringField(0, v);
             }
 
+            /// Information about each member -- i.e. fields (for structs), enumerants (for enums), or
+            /// methods (for interfaces).
+            ///
+            /// This list is the same length and order as the corresponding list in the Node, i.e.
+            /// Node.struct.fields, Node.enum.enumerants, or Node.interface.methods.
             pub fn members(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Node.SourceInfo.Member.Builder, _Root.Node.SourceInfo.Member.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.SourceInfo.Member.Builder, _Root.Node.SourceInfo.Member.builder_trait), 1);
             }
@@ -761,22 +870,35 @@ pub const Node = struct {
             return self.reader.readIntField(u64, 0) ^ 0;
         }
 
+        /// Name to present to humans to identify this Node.  You should not attempt to parse this.  Its
+        /// format could change.  It is not guaranteed to be unique.
+        ///
+        /// (On Zooko's triangle, this is the node's nickname.)
         pub fn displayName(self: @This()) capnp.Error![:0]const u8 {
             return try self.reader.readStringField(0);
         }
 
+        /// If you want a shorter version of `displayName` (just naming this node, without its surrounding
+        /// scope), chop off this many characters from the beginning of `displayName`.
         pub fn displayNamePrefixLength(self: @This()) u32 {
             return self.reader.readIntField(u32, 2) ^ 0;
         }
 
+        /// ID of the lexical parent node.  Typically, the scope node will have a NestedNode pointing back
+        /// at this node, but robust code should avoid relying on this (and, in fact, group nodes are not
+        /// listed in the outer struct's nestedNodes, since they are listed in the fields).  `scopeId` is
+        /// zero if the node has no parent, which is normally only the case with files, but should be
+        /// allowed for any kind of node (in order to make runtime type generation easier).
         pub fn scopeId(self: @This()) u64 {
             return self.reader.readIntField(u64, 2) ^ 0;
         }
 
+        /// List of nodes nested within this node, along with the names under which they were declared.
         pub fn nestedNodes(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Node.NestedNode.Reader, _Root.Node.NestedNode.reader_trait) {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Node.NestedNode.Reader, _Root.Node.NestedNode.reader_trait), 1);
         }
 
+        /// Annotations applied to this node.
         pub fn annotations(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Annotation.Reader, _Root.Annotation.reader_trait) {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Annotation.Reader, _Root.Annotation.reader_trait), 2);
         }
@@ -823,10 +945,13 @@ pub const Node = struct {
             return .{ .reader = self.reader };
         }
 
+        /// If this node is parameterized (generic), the list of parameters. Empty for non-generic types.
         pub fn parameters(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Node.Parameter.Reader, _Root.Node.Parameter.reader_trait) {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Node.Parameter.Reader, _Root.Node.Parameter.reader_trait), 5);
         }
 
+        /// True if this node is generic, meaning that it or one of its parent scopes has a non-empty
+        /// `parameters`.
         pub fn isGeneric(self: @This()) bool {
             return self.reader.readBoolField(288) != false;
         }
@@ -863,6 +988,10 @@ pub const Node = struct {
             self.builder.writeIntField(u64, 0, v ^ 0);
         }
 
+        /// Name to present to humans to identify this Node.  You should not attempt to parse this.  Its
+        /// format could change.  It is not guaranteed to be unique.
+        ///
+        /// (On Zooko's triangle, this is the node's nickname.)
         pub fn displayName(self: @This()) capnp.BuildError![:0]const u8 {
             return try self.builder.readStringField(0);
         }
@@ -871,6 +1000,8 @@ pub const Node = struct {
             try self.builder.writeStringField(0, v);
         }
 
+        /// If you want a shorter version of `displayName` (just naming this node, without its surrounding
+        /// scope), chop off this many characters from the beginning of `displayName`.
         pub fn displayNamePrefixLength(self: @This()) u32 {
             return self.builder.readIntField(u32, 2) ^ 0;
         }
@@ -879,6 +1010,11 @@ pub const Node = struct {
             self.builder.writeIntField(u32, 2, v ^ 0);
         }
 
+        /// ID of the lexical parent node.  Typically, the scope node will have a NestedNode pointing back
+        /// at this node, but robust code should avoid relying on this (and, in fact, group nodes are not
+        /// listed in the outer struct's nestedNodes, since they are listed in the fields).  `scopeId` is
+        /// zero if the node has no parent, which is normally only the case with files, but should be
+        /// allowed for any kind of node (in order to make runtime type generation easier).
         pub fn scopeId(self: @This()) u64 {
             return self.builder.readIntField(u64, 2) ^ 0;
         }
@@ -887,10 +1023,12 @@ pub const Node = struct {
             self.builder.writeIntField(u64, 2, v ^ 0);
         }
 
+        /// List of nodes nested within this node, along with the names under which they were declared.
         pub fn nestedNodes(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Node.NestedNode.Builder, _Root.Node.NestedNode.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.NestedNode.Builder, _Root.Node.NestedNode.builder_trait), 1);
         }
 
+        /// Annotations applied to this node.
         pub fn annotations(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 2);
         }
@@ -967,10 +1105,13 @@ pub const Node = struct {
             return .{ .builder = self.builder };
         }
 
+        /// If this node is parameterized (generic), the list of parameters. Empty for non-generic types.
         pub fn parameters(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait), 5);
         }
 
+        /// True if this node is generic, meaning that it or one of its parent scopes has a non-empty
+        /// `parameters`.
         pub fn isGeneric(self: @This()) bool {
             return self.builder.readBoolField(288) != false;
         }
@@ -1003,15 +1144,19 @@ pub const Node = struct {
     };
 };
 
+/// Schema for a field of a struct.
 pub const Field = struct {
     pub const id: u64 = 0x9aad50a41f4af45f;
 
     pub const Tag = enum(u16) {
+        /// A regular, non-group, non-fixed-list field.
         slot = 0,
+        /// A group.
         group = 1,
         _,
     };
 
+    /// A regular, non-group, non-fixed-list field.
     pub const slot = struct {
         pub const id: u64 = 0xc42305476bb4746f;
 
@@ -1030,6 +1175,9 @@ pub const Field = struct {
                 return @This().fromStructReader(capnp.StructReader.fromNull(context));
             }
 
+            /// Offset, in units of the field's size, from the beginning of the section in which the field
+            /// resides.  E.g. for a UInt32 field, multiply this by 4 to get the byte offset from the
+            /// beginning of the data section.
             pub fn offset(self: @This()) u32 {
                 return self.reader.readIntField(u32, 1) ^ 0;
             }
@@ -1042,6 +1190,10 @@ pub const Field = struct {
                 return try self.reader.readPtrField(_Root.Value.Reader, 3);
             }
 
+            /// Whether the default value was specified explicitly.  Non-explicit default values are always
+            /// zero or empty values.  Usually, whether the default value was explicit shouldn't matter.
+            /// The main use case for this flag is for structs representing method parameters:
+            /// explicitly-defaulted parameters may be allowed to be omitted when calling the method.
             pub fn hadExplicitDefault(self: @This()) bool {
                 return self.reader.readBoolField(128) != false;
             }
@@ -1058,6 +1210,9 @@ pub const Field = struct {
                 return .{ .builder = builder };
             }
 
+            /// Offset, in units of the field's size, from the beginning of the section in which the field
+            /// resides.  E.g. for a UInt32 field, multiply this by 4 to get the byte offset from the
+            /// beginning of the data section.
             pub fn offset(self: @This()) u32 {
                 return self.builder.readIntField(u32, 1) ^ 0;
             }
@@ -1074,6 +1229,10 @@ pub const Field = struct {
                 return try self.builder.buildStructField(_Root.Value.Builder, _Root.Value.builder_trait, 3);
             }
 
+            /// Whether the default value was specified explicitly.  Non-explicit default values are always
+            /// zero or empty values.  Usually, whether the default value was explicit shouldn't matter.
+            /// The main use case for this flag is for structs representing method parameters:
+            /// explicitly-defaulted parameters may be allowed to be omitted when calling the method.
             pub fn hadExplicitDefault(self: @This()) bool {
                 return self.builder.readBoolField(128) != false;
             }
@@ -1090,6 +1249,7 @@ pub const Field = struct {
         };
     };
 
+    /// A group.
     pub const group = struct {
         pub const id: u64 = 0xcafccddb68db1d11;
 
@@ -1108,6 +1268,7 @@ pub const Field = struct {
                 return @This().fromStructReader(capnp.StructReader.fromNull(context));
             }
 
+            /// The ID of the group's node.
             pub fn typeId(self: @This()) u64 {
                 return self.reader.readIntField(u64, 2) ^ 0;
             }
@@ -1124,6 +1285,7 @@ pub const Field = struct {
                 return .{ .builder = builder };
             }
 
+            /// The ID of the group's node.
             pub fn typeId(self: @This()) u64 {
                 return self.builder.readIntField(u64, 2) ^ 0;
             }
@@ -1145,6 +1307,10 @@ pub const Field = struct {
 
         pub const Tag = enum(u16) {
             implicit = 0,
+            /// The original ordinal number given to the field.  You probably should NOT use this; if you need
+            /// a numeric identifier for a field, use its position within the field array for its scope.
+            /// The ordinal is given here mainly just so that the original schema text can be reproduced given
+            /// the compiled version -- i.e. so that `capnp compile -ocapnp` can do its job.
             explicit = 1,
             _,
         };
@@ -1175,6 +1341,10 @@ pub const Field = struct {
                 return self.reader.readVoid();
             }
 
+            /// The original ordinal number given to the field.  You probably should NOT use this; if you need
+            /// a numeric identifier for a field, use its position within the field array for its scope.
+            /// The ordinal is given here mainly just so that the original schema text can be reproduced given
+            /// the compiled version -- i.e. so that `capnp compile -ocapnp` can do its job.
             pub fn explicit(self: @This()) ?u16 {
                 if (self.reader.readIntField(u16, 5) != 1) {
                     return null;
@@ -1210,6 +1380,10 @@ pub const Field = struct {
                 return;
             }
 
+            /// The original ordinal number given to the field.  You probably should NOT use this; if you need
+            /// a numeric identifier for a field, use its position within the field array for its scope.
+            /// The ordinal is given here mainly just so that the original schema text can be reproduced given
+            /// the compiled version -- i.e. so that `capnp compile -ocapnp` can do its job.
             pub fn explicit(self: @This()) ?u16 {
                 if (self.builder.readIntField(u16, 5) != 1) {
                     return null;
@@ -1254,6 +1428,12 @@ pub const Field = struct {
             return try self.reader.readStringField(0);
         }
 
+        /// Indicates where this member appeared in the code, relative to other members.
+        /// Code ordering may have semantic relevance -- programmers tend to place related fields
+        /// together.  So, using code ordering makes sense in human-readable formats where ordering is
+        /// otherwise irrelevant, like JSON.  The values of codeOrder are tightly-packed, so the maximum
+        /// value is count(members) - 1.  Fields that are members of a union are only ordered relative to
+        /// the other members of that union, so the maximum value there is count(union.members).
         pub fn codeOrder(self: @This()) u16 {
             return self.reader.readIntField(u16, 0) ^ 0;
         }
@@ -1262,10 +1442,13 @@ pub const Field = struct {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Annotation.Reader, _Root.Annotation.reader_trait), 1);
         }
 
+        /// If the field is in a union, this is the value which the union's discriminant should take when
+        /// the field is active.  If the field is not in a union, this is 0xffff.
         pub fn discriminantValue(self: @This()) u16 {
             return self.reader.readIntField(u16, 1) ^ 65535;
         }
 
+        /// A regular, non-group, non-fixed-list field.
         pub fn slot(self: @This()) ?_Root.Field.slot.Reader {
             if (self.reader.readIntField(u16, 4) != 0) {
                 return null;
@@ -1273,6 +1456,7 @@ pub const Field = struct {
             return .{ .reader = self.reader };
         }
 
+        /// A group.
         pub fn group(self: @This()) ?_Root.Field.group.Reader {
             if (self.reader.readIntField(u16, 4) != 1) {
                 return null;
@@ -1308,6 +1492,12 @@ pub const Field = struct {
             try self.builder.writeStringField(0, v);
         }
 
+        /// Indicates where this member appeared in the code, relative to other members.
+        /// Code ordering may have semantic relevance -- programmers tend to place related fields
+        /// together.  So, using code ordering makes sense in human-readable formats where ordering is
+        /// otherwise irrelevant, like JSON.  The values of codeOrder are tightly-packed, so the maximum
+        /// value is count(members) - 1.  Fields that are members of a union are only ordered relative to
+        /// the other members of that union, so the maximum value there is count(union.members).
         pub fn codeOrder(self: @This()) u16 {
             return self.builder.readIntField(u16, 0) ^ 0;
         }
@@ -1320,6 +1510,8 @@ pub const Field = struct {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 1);
         }
 
+        /// If the field is in a union, this is the value which the union's discriminant should take when
+        /// the field is active.  If the field is not in a union, this is 0xffff.
         pub fn discriminantValue(self: @This()) u16 {
             return self.builder.readIntField(u16, 1) ^ 65535;
         }
@@ -1328,6 +1520,7 @@ pub const Field = struct {
             self.builder.writeIntField(u16, 1, v ^ 65535);
         }
 
+        /// A regular, non-group, non-fixed-list field.
         pub fn slot(self: @This()) ?_Root.Field.slot.Builder {
             if (self.builder.readIntField(u16, 4) != 0) {
                 return null;
@@ -1340,6 +1533,7 @@ pub const Field = struct {
             return .{ .builder = self.builder };
         }
 
+        /// A group.
         pub fn group(self: @This()) ?_Root.Field.group.Builder {
             if (self.builder.readIntField(u16, 4) != 1) {
                 return null;
@@ -1364,6 +1558,7 @@ pub const Field = struct {
     };
 };
 
+/// Schema for member of an enum.
 pub const Enumerant = struct {
     pub const id: u64 = 0x978a7cebdc549a4d;
 
@@ -1386,6 +1581,8 @@ pub const Enumerant = struct {
             return try self.reader.readStringField(0);
         }
 
+        /// Specifies order in which the enumerants were declared in the code.
+        /// Like Struct.Field.codeOrder.
         pub fn codeOrder(self: @This()) u16 {
             return self.reader.readIntField(u16, 0) ^ 0;
         }
@@ -1414,6 +1611,8 @@ pub const Enumerant = struct {
             try self.builder.writeStringField(0, v);
         }
 
+        /// Specifies order in which the enumerants were declared in the code.
+        /// Like Struct.Field.codeOrder.
         pub fn codeOrder(self: @This()) u16 {
             return self.builder.readIntField(u16, 0) ^ 0;
         }
@@ -1492,6 +1691,7 @@ pub const Superclass = struct {
     };
 };
 
+/// Schema for method of an interface.
 pub const Method = struct {
     pub const id: u64 = 0x9500cce23b334d80;
 
@@ -1514,14 +1714,24 @@ pub const Method = struct {
             return try self.reader.readStringField(0);
         }
 
+        /// Specifies order in which the methods were declared in the code.
+        /// Like Struct.Field.codeOrder.
         pub fn codeOrder(self: @This()) u16 {
             return self.reader.readIntField(u16, 0) ^ 0;
         }
 
+        /// ID of the parameter struct type.  If a named parameter list was specified in the method
+        /// declaration (rather than a single struct parameter type) then a corresponding struct type is
+        /// auto-generated.  Such an auto-generated type will not be listed in the interface's
+        /// `nestedNodes` and its `scopeId` will be zero -- it is completely detached from the namespace.
+        /// (Awkwardly, it does of course inherit generic parameters from the method's scope, which makes
+        /// this a situation where you can't just climb the scope chain to find where a particular
+        /// generic parameter was introduced. Making the `scopeId` zero was a mistake.)
         pub fn paramStructType(self: @This()) u64 {
             return self.reader.readIntField(u64, 1) ^ 0;
         }
 
+        /// ID of the return struct type; similar to `paramStructType`.
         pub fn resultStructType(self: @This()) u64 {
             return self.reader.readIntField(u64, 2) ^ 0;
         }
@@ -1530,14 +1740,18 @@ pub const Method = struct {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Annotation.Reader, _Root.Annotation.reader_trait), 1);
         }
 
+        /// Brand of param struct type.
         pub fn paramBrand(self: @This()) capnp.Error!_Root.Brand.Reader {
             return try self.reader.readPtrField(_Root.Brand.Reader, 2);
         }
 
+        /// Brand of result struct type.
         pub fn resultBrand(self: @This()) capnp.Error!_Root.Brand.Reader {
             return try self.reader.readPtrField(_Root.Brand.Reader, 3);
         }
 
+        /// The parameters listed in [] (typically, type / generic parameters), whose bindings are intended
+        /// to be inferred rather than specified explicitly, although not all languages support this.
         pub fn implicitParameters(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Node.Parameter.Reader, _Root.Node.Parameter.reader_trait) {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Node.Parameter.Reader, _Root.Node.Parameter.reader_trait), 4);
         }
@@ -1562,6 +1776,8 @@ pub const Method = struct {
             try self.builder.writeStringField(0, v);
         }
 
+        /// Specifies order in which the methods were declared in the code.
+        /// Like Struct.Field.codeOrder.
         pub fn codeOrder(self: @This()) u16 {
             return self.builder.readIntField(u16, 0) ^ 0;
         }
@@ -1570,6 +1786,13 @@ pub const Method = struct {
             self.builder.writeIntField(u16, 0, v ^ 0);
         }
 
+        /// ID of the parameter struct type.  If a named parameter list was specified in the method
+        /// declaration (rather than a single struct parameter type) then a corresponding struct type is
+        /// auto-generated.  Such an auto-generated type will not be listed in the interface's
+        /// `nestedNodes` and its `scopeId` will be zero -- it is completely detached from the namespace.
+        /// (Awkwardly, it does of course inherit generic parameters from the method's scope, which makes
+        /// this a situation where you can't just climb the scope chain to find where a particular
+        /// generic parameter was introduced. Making the `scopeId` zero was a mistake.)
         pub fn paramStructType(self: @This()) u64 {
             return self.builder.readIntField(u64, 1) ^ 0;
         }
@@ -1578,6 +1801,7 @@ pub const Method = struct {
             self.builder.writeIntField(u64, 1, v ^ 0);
         }
 
+        /// ID of the return struct type; similar to `paramStructType`.
         pub fn resultStructType(self: @This()) u64 {
             return self.builder.readIntField(u64, 2) ^ 0;
         }
@@ -1590,14 +1814,18 @@ pub const Method = struct {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 1);
         }
 
+        /// Brand of param struct type.
         pub fn paramBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
             return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 2);
         }
 
+        /// Brand of result struct type.
         pub fn resultBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
             return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 3);
         }
 
+        /// The parameters listed in [] (typically, type / generic parameters), whose bindings are intended
+        /// to be inferred rather than specified explicitly, although not all languages support this.
         pub fn implicitParameters(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait), 4);
         }
@@ -1610,6 +1838,7 @@ pub const Method = struct {
     };
 };
 
+/// Represents a type expression.
 pub const Type = struct {
     pub const id: u64 = 0xd07378ede1f9cc60;
 
@@ -1860,19 +2089,36 @@ pub const Type = struct {
         pub const id: u64 = 0xc2573fe8a23e49f1;
 
         pub const Tag = enum(u16) {
+            /// A regular AnyPointer.
+            ///
+            /// The name "unconstrained" means as opposed to constraining it to match a type parameter.
+            /// In retrospect this name is probably a poor choice given that it may still be constrained
+            /// to be a struct, list, or capability.
             unconstrained = 0,
+            /// This is actually a reference to a type parameter defined within this scope.
             parameter = 1,
+            /// This is actually a reference to an implicit (generic) parameter of a method. The only
+            /// legal context for this type to appear is inside Method.paramBrand or Method.resultBrand.
             implicitMethodParameter = 2,
             _,
         };
 
+        /// A regular AnyPointer.
+        ///
+        /// The name "unconstrained" means as opposed to constraining it to match a type parameter.
+        /// In retrospect this name is probably a poor choice given that it may still be constrained
+        /// to be a struct, list, or capability.
         pub const unconstrained = struct {
             pub const id: u64 = 0x8e3b5f79fe593656;
 
             pub const Tag = enum(u16) {
+                /// truly AnyPointer
                 anyKind = 0,
+                /// AnyStruct
                 @"struct" = 1,
+                /// AnyList
                 list = 2,
+                /// Capability
                 capability = 3,
                 _,
             };
@@ -1896,6 +2142,7 @@ pub const Type = struct {
                     return @fromBackingInt(@intCast(self.reader.readIntField(u16, 5)));
                 }
 
+                /// truly AnyPointer
                 pub fn anyKind(self: @This()) ?void {
                     if (self.reader.readIntField(u16, 5) != 0) {
                         return null;
@@ -1903,6 +2150,7 @@ pub const Type = struct {
                     return self.reader.readVoid();
                 }
 
+                /// AnyStruct
                 pub fn @"struct"(self: @This()) ?void {
                     if (self.reader.readIntField(u16, 5) != 1) {
                         return null;
@@ -1910,6 +2158,7 @@ pub const Type = struct {
                     return self.reader.readVoid();
                 }
 
+                /// AnyList
                 pub fn list(self: @This()) ?void {
                     if (self.reader.readIntField(u16, 5) != 2) {
                         return null;
@@ -1917,6 +2166,7 @@ pub const Type = struct {
                     return self.reader.readVoid();
                 }
 
+                /// Capability
                 pub fn capability(self: @This()) ?void {
                     if (self.reader.readIntField(u16, 5) != 3) {
                         return null;
@@ -1940,6 +2190,7 @@ pub const Type = struct {
                     return @fromBackingInt(@intCast(self.builder.readIntField(u16, 5)));
                 }
 
+                /// truly AnyPointer
                 pub fn anyKind(self: @This()) ?void {
                     if (self.builder.readIntField(u16, 5) != 0) {
                         return null;
@@ -1952,6 +2203,7 @@ pub const Type = struct {
                     return;
                 }
 
+                /// AnyStruct
                 pub fn @"struct"(self: @This()) ?void {
                     if (self.builder.readIntField(u16, 5) != 1) {
                         return null;
@@ -1964,6 +2216,7 @@ pub const Type = struct {
                     return;
                 }
 
+                /// AnyList
                 pub fn list(self: @This()) ?void {
                     if (self.builder.readIntField(u16, 5) != 2) {
                         return null;
@@ -1976,6 +2229,7 @@ pub const Type = struct {
                     return;
                 }
 
+                /// Capability
                 pub fn capability(self: @This()) ?void {
                     if (self.builder.readIntField(u16, 5) != 3) {
                         return null;
@@ -1996,6 +2250,7 @@ pub const Type = struct {
             };
         };
 
+        /// This is actually a reference to a type parameter defined within this scope.
         pub const parameter = struct {
             pub const id: u64 = 0x9dd1f724f4614a85;
 
@@ -2014,10 +2269,13 @@ pub const Type = struct {
                     return @This().fromStructReader(capnp.StructReader.fromNull(context));
                 }
 
+                /// ID of the generic type whose parameter we're referencing. This is always either the
+                /// current scope's type ID or one of its ancestors' IDs.
                 pub fn scopeId(self: @This()) u64 {
                     return self.reader.readIntField(u64, 2) ^ 0;
                 }
 
+                /// Index of the parameter within the generic type's parameter list.
                 pub fn parameterIndex(self: @This()) u16 {
                     return self.reader.readIntField(u16, 5) ^ 0;
                 }
@@ -2034,6 +2292,8 @@ pub const Type = struct {
                     return .{ .builder = builder };
                 }
 
+                /// ID of the generic type whose parameter we're referencing. This is always either the
+                /// current scope's type ID or one of its ancestors' IDs.
                 pub fn scopeId(self: @This()) u64 {
                     return self.builder.readIntField(u64, 2) ^ 0;
                 }
@@ -2042,6 +2302,7 @@ pub const Type = struct {
                     self.builder.writeIntField(u64, 2, v ^ 0);
                 }
 
+                /// Index of the parameter within the generic type's parameter list.
                 pub fn parameterIndex(self: @This()) u16 {
                     return self.builder.readIntField(u16, 5) ^ 0;
                 }
@@ -2058,6 +2319,8 @@ pub const Type = struct {
             };
         };
 
+        /// This is actually a reference to an implicit (generic) parameter of a method. The only
+        /// legal context for this type to appear is inside Method.paramBrand or Method.resultBrand.
         pub const implicitMethodParameter = struct {
             pub const id: u64 = 0xbaefc9120c56e274;
 
@@ -2127,6 +2390,11 @@ pub const Type = struct {
                 return @fromBackingInt(@intCast(self.reader.readIntField(u16, 4)));
             }
 
+            /// A regular AnyPointer.
+            ///
+            /// The name "unconstrained" means as opposed to constraining it to match a type parameter.
+            /// In retrospect this name is probably a poor choice given that it may still be constrained
+            /// to be a struct, list, or capability.
             pub fn unconstrained(self: @This()) ?_Root.Type.anyPointer.unconstrained.Reader {
                 if (self.reader.readIntField(u16, 4) != 0) {
                     return null;
@@ -2134,6 +2402,7 @@ pub const Type = struct {
                 return .{ .reader = self.reader };
             }
 
+            /// This is actually a reference to a type parameter defined within this scope.
             pub fn parameter(self: @This()) ?_Root.Type.anyPointer.parameter.Reader {
                 if (self.reader.readIntField(u16, 4) != 1) {
                     return null;
@@ -2141,6 +2410,8 @@ pub const Type = struct {
                 return .{ .reader = self.reader };
             }
 
+            /// This is actually a reference to an implicit (generic) parameter of a method. The only
+            /// legal context for this type to appear is inside Method.paramBrand or Method.resultBrand.
             pub fn implicitMethodParameter(self: @This()) ?_Root.Type.anyPointer.implicitMethodParameter.Reader {
                 if (self.reader.readIntField(u16, 4) != 2) {
                     return null;
@@ -2164,6 +2435,11 @@ pub const Type = struct {
                 return @fromBackingInt(@intCast(self.builder.readIntField(u16, 4)));
             }
 
+            /// A regular AnyPointer.
+            ///
+            /// The name "unconstrained" means as opposed to constraining it to match a type parameter.
+            /// In retrospect this name is probably a poor choice given that it may still be constrained
+            /// to be a struct, list, or capability.
             pub fn unconstrained(self: @This()) ?_Root.Type.anyPointer.unconstrained.Builder {
                 if (self.builder.readIntField(u16, 4) != 0) {
                     return null;
@@ -2176,6 +2452,7 @@ pub const Type = struct {
                 return .{ .builder = self.builder };
             }
 
+            /// This is actually a reference to a type parameter defined within this scope.
             pub fn parameter(self: @This()) ?_Root.Type.anyPointer.parameter.Builder {
                 if (self.builder.readIntField(u16, 4) != 1) {
                     return null;
@@ -2188,6 +2465,8 @@ pub const Type = struct {
                 return .{ .builder = self.builder };
             }
 
+            /// This is actually a reference to an implicit (generic) parameter of a method. The only
+            /// legal context for this type to appear is inside Method.paramBrand or Method.resultBrand.
             pub fn implicitMethodParameter(self: @This()) ?_Root.Type.anyPointer.implicitMethodParameter.Builder {
                 if (self.builder.readIntField(u16, 4) != 2) {
                     return null;
@@ -2612,6 +2891,8 @@ pub const Type = struct {
     };
 };
 
+/// Specifies bindings for parameters of generics. Since these bindings turn a generic into a
+/// non-generic, we call it the "brand".
 pub const Brand = struct {
     pub const id: u64 = 0x903455f06065422b;
 
@@ -2619,7 +2900,23 @@ pub const Brand = struct {
         pub const id: u64 = 0xabd73485a9636bc9;
 
         pub const Tag = enum(u16) {
+            /// List of parameter bindings.
             bind = 0,
+            /// The place where the Brand appears is within this scope or a sub-scope, and bindings
+            /// for this scope are deferred to later Brand applications. This is equivalent to a
+            /// pass-through binding list, where each of this scope's parameters is bound to itself.
+            /// For example:
+            ///
+            ///   struct Outer(T) {
+            ///     struct Inner {
+            ///       value @0 :T;
+            ///     }
+            ///     innerInherit @0 :Inner;            # Outer Brand.Scope is `inherit`.
+            ///     innerBindSelf @1 :Outer(T).Inner;  # Outer Brand.Scope explicitly binds T to T.
+            ///   }
+            ///
+            /// The innerInherit and innerBindSelf fields have equivalent types, but different Brand
+            /// styles.
             inherit = 1,
             _,
         };
@@ -2643,10 +2940,12 @@ pub const Brand = struct {
                 return @fromBackingInt(@intCast(self.reader.readIntField(u16, 4)));
             }
 
+            /// ID of the scope to which these params apply.
             pub fn scopeId(self: @This()) u64 {
                 return self.reader.readIntField(u64, 0) ^ 0;
             }
 
+            /// List of parameter bindings.
             pub fn bind(self: @This()) capnp.Error!?capnp.CompositeListReader(_Root.Brand.Binding.Reader, _Root.Brand.Binding.reader_trait) {
                 if (self.reader.readIntField(u16, 4) != 0) {
                     return null;
@@ -2654,6 +2953,21 @@ pub const Brand = struct {
                 return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Brand.Binding.Reader, _Root.Brand.Binding.reader_trait), 0);
             }
 
+            /// The place where the Brand appears is within this scope or a sub-scope, and bindings
+            /// for this scope are deferred to later Brand applications. This is equivalent to a
+            /// pass-through binding list, where each of this scope's parameters is bound to itself.
+            /// For example:
+            ///
+            ///   struct Outer(T) {
+            ///     struct Inner {
+            ///       value @0 :T;
+            ///     }
+            ///     innerInherit @0 :Inner;            # Outer Brand.Scope is `inherit`.
+            ///     innerBindSelf @1 :Outer(T).Inner;  # Outer Brand.Scope explicitly binds T to T.
+            ///   }
+            ///
+            /// The innerInherit and innerBindSelf fields have equivalent types, but different Brand
+            /// styles.
             pub fn inherit(self: @This()) ?void {
                 if (self.reader.readIntField(u16, 4) != 1) {
                     return null;
@@ -2677,6 +2991,7 @@ pub const Brand = struct {
                 return @fromBackingInt(@intCast(self.builder.readIntField(u16, 4)));
             }
 
+            /// ID of the scope to which these params apply.
             pub fn scopeId(self: @This()) u64 {
                 return self.builder.readIntField(u64, 0) ^ 0;
             }
@@ -2685,6 +3000,7 @@ pub const Brand = struct {
                 self.builder.writeIntField(u64, 0, v ^ 0);
             }
 
+            /// List of parameter bindings.
             pub fn bind(self: @This()) capnp.BuildError!?capnp.CompositeListBuilder(_Root.Brand.Binding.Builder, _Root.Brand.Binding.builder_trait) {
                 if (self.builder.readIntField(u16, 4) != 0) {
                     return null;
@@ -2692,6 +3008,21 @@ pub const Brand = struct {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Brand.Binding.Builder, _Root.Brand.Binding.builder_trait), 0);
             }
 
+            /// The place where the Brand appears is within this scope or a sub-scope, and bindings
+            /// for this scope are deferred to later Brand applications. This is equivalent to a
+            /// pass-through binding list, where each of this scope's parameters is bound to itself.
+            /// For example:
+            ///
+            ///   struct Outer(T) {
+            ///     struct Inner {
+            ///       value @0 :T;
+            ///     }
+            ///     innerInherit @0 :Inner;            # Outer Brand.Scope is `inherit`.
+            ///     innerBindSelf @1 :Outer(T).Inner;  # Outer Brand.Scope explicitly binds T to T.
+            ///   }
+            ///
+            /// The innerInherit and innerBindSelf fields have equivalent types, but different Brand
+            /// styles.
             pub fn inherit(self: @This()) ?void {
                 if (self.builder.readIntField(u16, 4) != 1) {
                     return null;
@@ -2812,6 +3143,9 @@ pub const Brand = struct {
             return @This().fromStructReader(capnp.StructReader.fromNull(context));
         }
 
+        /// For each of the target type and each of its parent scopes, a parameterization may be included
+        /// in this list. If no parameterization is included for a particular relevant scope, then either
+        /// that scope has no parameters or all parameters should be considered to be `AnyPointer`.
         pub fn scopes(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Brand.Scope.Reader, _Root.Brand.Scope.reader_trait) {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Brand.Scope.Reader, _Root.Brand.Scope.reader_trait), 0);
         }
@@ -2828,6 +3162,9 @@ pub const Brand = struct {
             return .{ .builder = builder };
         }
 
+        /// For each of the target type and each of its parent scopes, a parameterization may be included
+        /// in this list. If no parameterization is included for a particular relevant scope, then either
+        /// that scope has no parameters or all parameters should be considered to be `AnyPointer`.
         pub fn scopes(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Brand.Scope.Builder, _Root.Brand.Scope.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Brand.Scope.Builder, _Root.Brand.Scope.builder_trait), 0);
         }
@@ -2840,6 +3177,7 @@ pub const Brand = struct {
     };
 };
 
+/// Represents a value, e.g. a field default value, constant value, or annotation value.
 pub const Value = struct {
     pub const id: u64 = 0xce23dcd2d7b00c9b;
 
@@ -2861,6 +3199,8 @@ pub const Value = struct {
         list = 14,
         @"enum" = 15,
         @"struct" = 16,
+        /// The only interface value that can be represented statically is "null", whose methods always
+        /// throw exceptions.
         interface = 17,
         anyPointer = 18,
         _,
@@ -3004,6 +3344,8 @@ pub const Value = struct {
             return try self.reader.readPtrField(capnp.AnyPointerReader, 0);
         }
 
+        /// The only interface value that can be represented statically is "null", whose methods always
+        /// throw exceptions.
         pub fn interface(self: @This()) ?void {
             if (self.reader.readIntField(u16, 0) != 17) {
                 return null;
@@ -3228,6 +3570,8 @@ pub const Value = struct {
             return try self.builder.readPtrField(capnp.AnyPointerReader, 0);
         }
 
+        /// The only interface value that can be represented statically is "null", whose methods always
+        /// throw exceptions.
         pub fn interface(self: @This()) ?void {
             if (self.builder.readIntField(u16, 0) != 17) {
                 return null;
@@ -3255,6 +3599,8 @@ pub const Value = struct {
     };
 };
 
+/// Describes an annotation applied to a declaration.  Note AnnotationNode describes the
+/// annotation's declaration, while this describes a use of the annotation.
 pub const Annotation = struct {
     pub const id: u64 = 0xf1c8950dab257542;
 
@@ -3273,6 +3619,7 @@ pub const Annotation = struct {
             return @This().fromStructReader(capnp.StructReader.fromNull(context));
         }
 
+        /// ID of the annotation node.
         pub fn id(self: @This()) u64 {
             return self.reader.readIntField(u64, 0) ^ 0;
         }
@@ -3281,6 +3628,9 @@ pub const Annotation = struct {
             return try self.reader.readPtrField(_Root.Value.Reader, 0);
         }
 
+        /// Brand of the annotation.
+        ///
+        /// Note that the annotation itself is not allowed to be parameterized, but its scope might be.
         pub fn brand(self: @This()) capnp.Error!_Root.Brand.Reader {
             return try self.reader.readPtrField(_Root.Brand.Reader, 1);
         }
@@ -3297,6 +3647,7 @@ pub const Annotation = struct {
             return .{ .builder = builder };
         }
 
+        /// ID of the annotation node.
         pub fn id(self: @This()) u64 {
             return self.builder.readIntField(u64, 0) ^ 0;
         }
@@ -3309,6 +3660,9 @@ pub const Annotation = struct {
             return try self.builder.buildStructField(_Root.Value.Builder, _Root.Value.builder_trait, 0);
         }
 
+        /// Brand of the annotation.
+        ///
+        /// Note that the annotation itself is not allowed to be parameterized, but its scope might be.
         pub fn brand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
             return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 1);
         }
@@ -3321,7 +3675,10 @@ pub const Annotation = struct {
     };
 };
 
+/// Possible element sizes for encoded lists.  These correspond exactly to the possible values of
+/// the 3-bit element size component of a list pointer.
 pub const ElementSize = enum(u16) {
+    /// aka "void", but that's a keyword.
     empty = 0,
     bit = 1,
     byte = 2,
@@ -3430,10 +3787,17 @@ pub const CodeGeneratorRequest = struct {
                     return @This().fromStructReader(capnp.StructReader.fromNull(context));
                 }
 
+                /// ID of the imported file.
                 pub fn id(self: @This()) u64 {
                     return self.reader.readIntField(u64, 0) ^ 0;
                 }
 
+                /// Name which *this* file used to refer to the foreign file.  This may be a relative name.
+                /// This information is provided because it might be useful for code generation, e.g. to
+                /// generate #include directives in C++.  We don't put this in Node.file because this
+                /// information is only meaningful at compile time anyway.
+                ///
+                /// (On Zooko's triangle, this is the import's petname according to the importing file.)
                 pub fn name(self: @This()) capnp.Error![:0]const u8 {
                     return try self.reader.readStringField(0);
                 }
@@ -3450,6 +3814,7 @@ pub const CodeGeneratorRequest = struct {
                     return .{ .builder = builder };
                 }
 
+                /// ID of the imported file.
                 pub fn id(self: @This()) u64 {
                     return self.builder.readIntField(u64, 0) ^ 0;
                 }
@@ -3458,6 +3823,12 @@ pub const CodeGeneratorRequest = struct {
                     self.builder.writeIntField(u64, 0, v ^ 0);
                 }
 
+                /// Name which *this* file used to refer to the foreign file.  This may be a relative name.
+                /// This information is provided because it might be useful for code generation, e.g. to
+                /// generate #include directives in C++.  We don't put this in Node.file because this
+                /// information is only meaningful at compile time anyway.
+                ///
+                /// (On Zooko's triangle, this is the import's petname according to the importing file.)
                 pub fn name(self: @This()) capnp.BuildError![:0]const u8 {
                     return try self.builder.readStringField(0);
                 }
@@ -3481,11 +3852,14 @@ pub const CodeGeneratorRequest = struct {
                 pub const id: u64 = 0xdda719892e0499bb;
 
                 pub const Tag = enum(u16) {
+                    /// Identifier refers to a type. This is the type ID.
                     typeId = 0,
+                    /// Identifier refers to a member of a type.
                     member = 1,
                     _,
                 };
 
+                /// Identifier refers to a member of a type.
                 pub const member = struct {
                     pub const id: u64 = 0xfc69d5e1d630a151;
 
@@ -3575,6 +3949,7 @@ pub const CodeGeneratorRequest = struct {
                         return self.reader.readIntField(u32, 1) ^ 0;
                     }
 
+                    /// Identifier refers to a type. This is the type ID.
                     pub fn typeId(self: @This()) ?u64 {
                         if (self.reader.readIntField(u16, 8) != 0) {
                             return null;
@@ -3582,6 +3957,7 @@ pub const CodeGeneratorRequest = struct {
                         return self.reader.readIntField(u64, 1) ^ 0;
                     }
 
+                    /// Identifier refers to a member of a type.
                     pub fn member(self: @This()) ?_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.member.Reader {
                         if (self.reader.readIntField(u16, 8) != 1) {
                             return null;
@@ -3621,6 +3997,7 @@ pub const CodeGeneratorRequest = struct {
                         self.builder.writeIntField(u32, 1, v ^ 0);
                     }
 
+                    /// Identifier refers to a type. This is the type ID.
                     pub fn typeId(self: @This()) ?u64 {
                         if (self.builder.readIntField(u16, 8) != 0) {
                             return null;
@@ -3633,6 +4010,7 @@ pub const CodeGeneratorRequest = struct {
                         self.builder.writeIntField(u64, 1, v ^ 0);
                     }
 
+                    /// Identifier refers to a member of a type.
                     pub fn member(self: @This()) ?_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.member.Builder {
                         if (self.builder.readIntField(u16, 8) != 1) {
                             return null;
@@ -3711,14 +4089,18 @@ pub const CodeGeneratorRequest = struct {
                 return @This().fromStructReader(capnp.StructReader.fromNull(context));
             }
 
+            /// ID of the file.
             pub fn id(self: @This()) u64 {
                 return self.reader.readIntField(u64, 0) ^ 0;
             }
 
+            /// Name of the file as it appeared on the command-line (minus the src-prefix).  You may use
+            /// this to decide where to write the output.
             pub fn filename(self: @This()) capnp.Error![:0]const u8 {
                 return try self.reader.readStringField(0);
             }
 
+            /// List of all imported paths seen in this file.
             pub fn imports(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.CodeGeneratorRequest.RequestedFile.Import.Reader, _Root.CodeGeneratorRequest.RequestedFile.Import.reader_trait) {
                 return try self.reader.readPtrField(capnp.CompositeListReader(_Root.CodeGeneratorRequest.RequestedFile.Import.Reader, _Root.CodeGeneratorRequest.RequestedFile.Import.reader_trait), 1);
             }
@@ -3739,6 +4121,7 @@ pub const CodeGeneratorRequest = struct {
                 return .{ .builder = builder };
             }
 
+            /// ID of the file.
             pub fn id(self: @This()) u64 {
                 return self.builder.readIntField(u64, 0) ^ 0;
             }
@@ -3747,6 +4130,8 @@ pub const CodeGeneratorRequest = struct {
                 self.builder.writeIntField(u64, 0, v ^ 0);
             }
 
+            /// Name of the file as it appeared on the command-line (minus the src-prefix).  You may use
+            /// this to decide where to write the output.
             pub fn filename(self: @This()) capnp.BuildError![:0]const u8 {
                 return try self.builder.readStringField(0);
             }
@@ -3755,6 +4140,7 @@ pub const CodeGeneratorRequest = struct {
                 try self.builder.writeStringField(0, v);
             }
 
+            /// List of all imported paths seen in this file.
             pub fn imports(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Import.Builder, _Root.CodeGeneratorRequest.RequestedFile.Import.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Import.Builder, _Root.CodeGeneratorRequest.RequestedFile.Import.builder_trait), 1);
             }
@@ -3786,18 +4172,29 @@ pub const CodeGeneratorRequest = struct {
             return @This().fromStructReader(capnp.StructReader.fromNull(context));
         }
 
+        /// All nodes parsed by the compiler, including for the files on the command line and their
+        /// imports.
         pub fn nodes(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Node.Reader, _Root.Node.reader_trait) {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Node.Reader, _Root.Node.reader_trait), 0);
         }
 
+        /// Files which were listed on the command line.
         pub fn requestedFiles(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.CodeGeneratorRequest.RequestedFile.Reader, _Root.CodeGeneratorRequest.RequestedFile.reader_trait) {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.CodeGeneratorRequest.RequestedFile.Reader, _Root.CodeGeneratorRequest.RequestedFile.reader_trait), 1);
         }
 
+        /// Version of the `capnp` executable. Generally, code generators should ignore this, but the code
+        /// generators that ship with `capnp` itself will print a warning if this mismatches since that
+        /// probably indicates something is misconfigured.
+        ///
+        /// The first version of 'capnp' to set this was 0.6.0. So, if it's missing, the compiler version
+        /// is older than that.
         pub fn capnpVersion(self: @This()) capnp.Error!_Root.CapnpVersion.Reader {
             return try self.reader.readPtrField(_Root.CapnpVersion.Reader, 2);
         }
 
+        /// Information about the original source code for each node, where available. This array may be
+        /// omitted or may be missing some nodes if no info is available for them.
         pub fn sourceInfo(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Node.SourceInfo.Reader, _Root.Node.SourceInfo.reader_trait) {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Node.SourceInfo.Reader, _Root.Node.SourceInfo.reader_trait), 3);
         }
@@ -3814,18 +4211,29 @@ pub const CodeGeneratorRequest = struct {
             return .{ .builder = builder };
         }
 
+        /// All nodes parsed by the compiler, including for the files on the command line and their
+        /// imports.
         pub fn nodes(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Node.Builder, _Root.Node.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.Builder, _Root.Node.builder_trait), 0);
         }
 
+        /// Files which were listed on the command line.
         pub fn requestedFiles(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Builder, _Root.CodeGeneratorRequest.RequestedFile.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Builder, _Root.CodeGeneratorRequest.RequestedFile.builder_trait), 1);
         }
 
+        /// Version of the `capnp` executable. Generally, code generators should ignore this, but the code
+        /// generators that ship with `capnp` itself will print a warning if this mismatches since that
+        /// probably indicates something is misconfigured.
+        ///
+        /// The first version of 'capnp' to set this was 0.6.0. So, if it's missing, the compiler version
+        /// is older than that.
         pub fn capnpVersion(self: @This()) capnp.BuildError!_Root.CapnpVersion.Builder {
             return try self.builder.buildStructField(_Root.CapnpVersion.Builder, _Root.CapnpVersion.builder_trait, 2);
         }
 
+        /// Information about the original source code for each node, where available. This array may be
+        /// omitted or may be missing some nodes if no info is available for them.
         pub fn sourceInfo(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Node.SourceInfo.Builder, _Root.Node.SourceInfo.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.SourceInfo.Builder, _Root.Node.SourceInfo.builder_trait), 3);
         }

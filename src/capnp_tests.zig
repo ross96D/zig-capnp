@@ -1,488 +1,107 @@
 const std = @import("std");
-const capnp = @import("capnp.zig");
+const capnp = @import("capnp");
+const schema = @import("capnpc").schema;
 const testing = std.testing;
 
-pub const Date = struct {
-    pub const _Metadata = capnp.StructMetadata{
-        .dataWords = 1,
-        .ptrWords = 0,
-    };
-
-    pub const Reader = struct {
-        reader: capnp.Struct.Reader,
-
-        pub fn getYear(self: Reader) i16 {
-            return self.reader.readIntField(i16, 0);
-        }
-
-        pub fn getMonth(self: Reader) u8 {
-            return self.reader.readIntField(u8, 2);
-        }
-
-        pub fn getDay(self: Reader) u8 {
-            return self.reader.readIntField(u8, 3);
-        }
-    };
-
-    pub const Builder = struct {
-        builder: capnp.Struct.Builder,
-
-        pub fn getYear(self: Builder) i16 {
-            return self.builder.readIntField(i16, 0);
-        }
-
-        pub fn getMonth(self: Builder) u8 {
-            return self.builder.readIntField(u8, 2);
-        }
-
-        pub fn getDay(self: Builder) u8 {
-            return self.builder.readIntField(u8, 3);
-        }
-
-        pub fn setYear(self: Builder, value: i16) void {
-            return self.builder.writeIntField(i16, 0, value);
-        }
-
-        pub fn setMonth(self: Builder, value: u8) void {
-            return self.builder.writeIntField(u8, 2, value);
-        }
-
-        pub fn setDay(self: Builder, value: u8) void {
-            return self.builder.writeIntField(u8, 3, value);
-        }
-    };
+const ExpectedStruct = struct {
+    id: u64,
+    name: []const u8,
+    data_words: u16,
+    ptr_words: u16,
+    is_group: bool,
+    discriminant_count: u16,
+    discriminant_offset: u32,
 };
 
-test "simple struct unpacking" {
-    var file = try std.fs.cwd().openFile("capnp-tests/01_simple_struct_date_20230714.bin", .{});
-    defer file.close();
-
-    var message = try capnp.Message.fromFile(file, std.testing.allocator);
-    defer message.deinit(std.testing.allocator);
-    const s = try message.getRootStruct(Date);
-    //std.debug.print("{}\n", .{s});
-
-    try std.testing.expectEqual(@as(i16, 2023), s.getYear());
-    try std.testing.expectEqual(@as(u8, 7), s.getMonth());
-    try std.testing.expectEqual(@as(u8, 14), s.getDay());
-}
-
-test "simple struct packing" {
-    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
-    defer builder.deinit();
-
-    var date = try builder.initRootStruct(Date);
-
-    try std.testing.expectEqual(@as(u32, 1), date.builder.context.offsetWords);
-
-    date.setDay(14);
-    date.setMonth(7);
-    date.setYear(2023);
-
-    try std.testing.expectEqual(@as(i16, 2023), date.getYear());
-    try std.testing.expectEqual(@as(u8, 7), date.getMonth());
-    try std.testing.expectEqual(@as(u8, 14), date.getDay());
-}
-
-test "simple struct unpacking (negative year)" {
-    var file = try std.fs.cwd().openFile("capnp-tests/01_simple_struct_datem_20230714.bin", .{});
-    defer file.close();
-
-    var message = try capnp.Message.fromFile(file, std.testing.allocator);
-    defer message.deinit(std.testing.allocator);
-    const s = try message.getRootStruct(Date);
-
-    try std.testing.expectEqual(@as(i16, -2023), s.getYear());
-    try std.testing.expectEqual(@as(u8, 7), s.getMonth());
-    try std.testing.expectEqual(@as(u8, 14), s.getDay());
-}
-
-pub const Lists = struct {
-    pub const _Metadata = capnp.StructMetadata{
-        .ptrWords = 1,
-        .dataWords = 0,
-    };
-
-    pub const Reader = struct {
-        reader: capnp.Struct.Reader,
-
-        pub fn getU8(self: Reader) capnp.Error!capnp.List(u8).Reader {
-            return self.reader.readPtrField(capnp.List(u8).Reader, 0);
-        }
-    };
-
-    pub const Builder = struct {
-        builder: capnp.Struct.Builder,
-
-        pub fn getU8(self: Builder) capnp.List(u8).Builder {
-            return self.builder.buildPtrField(capnp.List(u8).Builder, 0);
-        }
-    };
+// Golden table extracted from:
+// capnp decode /usr/local/include/capnp/schema.capnp CodeGeneratorRequest \
+//   < capnp-tests/06_schema.capnp.original.1.bin
+const expected_schema_structs = [_]ExpectedStruct{
+    .{ .id = 0x9aad50a41f4af45f, .name = "Field", .data_words = 3, .ptr_words = 4, .is_group = false, .discriminant_count = 2, .discriminant_offset = 4 },
+    .{ .id = 0xe682ab4cf923a417, .name = "Node", .data_words = 6, .ptr_words = 6, .is_group = false, .discriminant_count = 6, .discriminant_offset = 6 },
+    .{ .id = 0x9ea0b19b37fb4435, .name = "Node.struct", .data_words = 6, .ptr_words = 6, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0x978a7cebdc549a4d, .name = "Enumerant", .data_words = 1, .ptr_words = 2, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xb54ab3364333f598, .name = "Node.enum", .data_words = 6, .ptr_words = 6, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0x9500cce23b334d80, .name = "Method", .data_words = 3, .ptr_words = 5, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xa9962a9ed0a4d7f8, .name = "Superclass", .data_words = 1, .ptr_words = 1, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xe82753cff0c2218f, .name = "Node.interface", .data_words = 6, .ptr_words = 6, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xd07378ede1f9cc60, .name = "Type", .data_words = 3, .ptr_words = 1, .is_group = false, .discriminant_count = 19, .discriminant_offset = 0 },
+    .{ .id = 0xce23dcd2d7b00c9b, .name = "Value", .data_words = 2, .ptr_words = 1, .is_group = false, .discriminant_count = 19, .discriminant_offset = 0 },
+    .{ .id = 0xb18aa5ac7a0d9420, .name = "Node.const", .data_words = 6, .ptr_words = 6, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xec1619d4400a0290, .name = "Node.annotation", .data_words = 6, .ptr_words = 6, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xdebf55bbfa0fc242, .name = "Node.NestedNode", .data_words = 1, .ptr_words = 1, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xf1c8950dab257542, .name = "Annotation", .data_words = 1, .ptr_words = 2, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xb9521bccf10fa3b1, .name = "Node.Parameter", .data_words = 0, .ptr_words = 1, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0x903455f06065422b, .name = "Brand", .data_words = 0, .ptr_words = 1, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xabd73485a9636bc9, .name = "Brand.Scope", .data_words = 2, .ptr_words = 1, .is_group = false, .discriminant_count = 2, .discriminant_offset = 4 },
+    .{ .id = 0xc863cd16969ee7fc, .name = "Brand.Binding", .data_words = 1, .ptr_words = 1, .is_group = false, .discriminant_count = 2, .discriminant_offset = 0 },
+    .{ .id = 0x87e739250a60ea97, .name = "Type.list", .data_words = 3, .ptr_words = 1, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0x9e0e78711a7f87a9, .name = "Type.enum", .data_words = 3, .ptr_words = 1, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xac3a6f60ef4cc6d3, .name = "Type.struct", .data_words = 3, .ptr_words = 1, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xed8bca69f7fb0cbf, .name = "Type.interface", .data_words = 3, .ptr_words = 1, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0x8e3b5f79fe593656, .name = "Type.anyPointer.unconstrained", .data_words = 3, .ptr_words = 1, .is_group = true, .discriminant_count = 4, .discriminant_offset = 5 },
+    .{ .id = 0x9dd1f724f4614a85, .name = "Type.anyPointer.parameter", .data_words = 3, .ptr_words = 1, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xbaefc9120c56e274, .name = "Type.anyPointer.implicitMethodParameter", .data_words = 3, .ptr_words = 1, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xc2573fe8a23e49f1, .name = "Type.anyPointer", .data_words = 3, .ptr_words = 1, .is_group = true, .discriminant_count = 3, .discriminant_offset = 4 },
+    .{ .id = 0xc42305476bb4746f, .name = "Field.slot", .data_words = 3, .ptr_words = 4, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xcafccddb68db1d11, .name = "Field.group", .data_words = 3, .ptr_words = 4, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xbb90d5c287870be6, .name = "Field.ordinal", .data_words = 3, .ptr_words = 4, .is_group = true, .discriminant_count = 2, .discriminant_offset = 5 },
+    .{ .id = 0xc2ba9038898e1fa2, .name = "Node.SourceInfo.Member", .data_words = 0, .ptr_words = 1, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xf38e1de3041357ae, .name = "Node.SourceInfo", .data_words = 2, .ptr_words = 2, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xd85d305b7d839963, .name = "CapnpVersion", .data_words = 1, .ptr_words = 0, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xcfea0eb02e810062, .name = "CodeGeneratorRequest.RequestedFile", .data_words = 1, .ptr_words = 3, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xbfc546f6210ad7ce, .name = "CodeGeneratorRequest", .data_words = 0, .ptr_words = 4, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xae504193122357e5, .name = "CodeGeneratorRequest.RequestedFile.Import", .data_words = 1, .ptr_words = 1, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xf8ea2bf176925da0, .name = "CodeGeneratorRequest.RequestedFile.FileSourceInfo", .data_words = 0, .ptr_words = 1, .is_group = false, .discriminant_count = 0, .discriminant_offset = 0 },
+    .{ .id = 0xdda719892e0499bb, .name = "CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier", .data_words = 3, .ptr_words = 0, .is_group = false, .discriminant_count = 2, .discriminant_offset = 8 },
+    .{ .id = 0xfc69d5e1d630a151, .name = "CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.member", .data_words = 3, .ptr_words = 0, .is_group = true, .discriminant_count = 0, .discriminant_offset = 0 },
 };
 
-pub const CompositeLists = struct {
-    pub const _Metadata = capnp.StructMetadata{
-        .ptrWords = 1,
-        .dataWords = 0,
-    };
-    pub const Reader = struct {
-        reader: capnp.Struct.Reader,
+test "golden: CodeGeneratorRequest node table" {
+    const file = try std.Io.Dir.cwd().openFile(std.testing.io, "capnp-tests/06_schema.capnp.original.1.bin", .{});
+    defer file.close(std.testing.io);
 
-        pub fn getDates(self: Reader) capnp.Error!capnp.List(Date).Reader {
-            return self.reader.readPtrField(capnp.List(Date).Reader, 0);
-        }
-    };
-
-    pub const Builder = struct {
-        builder: capnp.Struct.Builder,
-
-        pub fn getDates(self: Builder) capnp.List(Date).Builder {
-            return self.builder.buildPtrField(capnp.List(Date).Builder, 0);
-        }
-    };
-};
-
-test "struct of lists" {
-    var file = try std.fs.cwd().openFile("capnp-tests/02_simple_lists.bin", .{});
-    defer file.close();
-
-    var message = try capnp.Message.fromFile(file, std.testing.allocator);
+    var message = try capnp.Message.fromFile(file, std.testing.io, std.testing.allocator);
     defer message.deinit(std.testing.allocator);
 
-    const s = try message.getRootStruct(Lists);
+    const request = try message.getRootStruct(schema.CodeGeneratorRequest.Reader, schema.CodeGeneratorRequest.reader_trait);
+    const nodes = try request.nodes();
 
-    const xs = try s.getU8();
-    for (0..xs.length) |i| {
-        const j: u32 = @intCast(i);
-        try std.testing.expectEqual(j, xs.get(j));
-    }
-}
+    try std.testing.expectEqual(@as(u29, 43), nodes.length);
 
-test "struct of lists (writing)" {
-    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
-    defer builder.deinit();
+    var seen: [expected_schema_structs.len]bool = @splat(false);
+    var schema_struct_count: usize = 0;
 
-    {
-        var lists = try builder.initRootStruct(Lists);
+    for (0..nodes.length) |i| {
+        const node = nodes.get(@intCast(i));
+        if (node.which() != .@"struct") continue;
 
-        var list = lists.getU8();
-        try list.init(10);
+        const display_name = try node.displayName();
+        if (std.mem.indexOf(u8, display_name, "schema.capnp:") == null) continue;
 
-        for (0..10) |i| {
-            list.set(@intCast(i), @intCast(i));
-            try std.testing.expectEqual(@as(u8, @intCast(i)), list.get(@intCast(i)));
+        schema_struct_count += 1;
+        const struct_node = node.@"struct"().?;
+        var found = false;
+
+        for (expected_schema_structs, 0..) |expected, j| {
+            if (expected.id != node.id()) continue;
+
+            found = true;
+            seen[j] = true;
+            try std.testing.expect(std.mem.endsWith(u8, display_name, expected.name));
+            try std.testing.expectEqual(expected.data_words, struct_node.dataWordCount());
+            try std.testing.expectEqual(expected.ptr_words, struct_node.pointerCount());
+            try std.testing.expectEqual(expected.is_group, struct_node.isGroup());
+            try std.testing.expectEqual(expected.discriminant_count, struct_node.discriminantCount());
+            try std.testing.expectEqual(expected.discriminant_offset, struct_node.discriminantOffset());
+            break;
         }
-    }
-    {
-        var reader = builder.toReader();
-        var lists = try reader.getRootStruct(Lists);
 
-        var list = try lists.getU8();
-        for (0..10) |i| {
-            try std.testing.expectEqual(@as(u8, @intCast(i)), list.get(@as(u32, @intCast(i))));
-        }
-    }
-}
-
-test "struct of composite list" {
-    var file = try std.fs.cwd().openFile("capnp-tests/03_composite_lists.bin", .{});
-    defer file.close();
-
-    var message = try capnp.Message.fromFile(file, std.testing.allocator);
-    defer message.deinit(std.testing.allocator);
-
-    const s = try message.getRootStruct(CompositeLists);
-
-    var it = (try s.getDates()).iter();
-
-    while (it.next()) |x| {
-        std.debug.print("year={}\n", .{x.getYear()});
-    }
-}
-
-test "struct of composite list (writing)" {
-    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
-    defer builder.deinit();
-    {
-        var lists = try builder.initRootStruct(CompositeLists);
-
-        var list = lists.getDates();
-        try list.init(10);
-
-        for (0..10) |i| {
-            list.get(@intCast(i)).setYear(@intCast(i));
-        }
+        try std.testing.expect(found);
     }
 
-    {
-        var reader = builder.toReader();
-        var lists = try reader.getRootStruct(CompositeLists);
-        var list = try lists.getDates();
-
-        for (0..10) |i| {
-            try std.testing.expectEqual(@as(i16, @intCast(i)), list.get(@intCast(i)).getYear());
-        }
+    try std.testing.expectEqual(expected_schema_structs.len, schema_struct_count);
+    for (seen) |was_seen| {
+        try std.testing.expect(was_seen);
     }
-}
-
-pub const UnionTest = struct {
-    pub const _Metadata = capnp.StructMetadata{
-        .dataWords = 1,
-        .ptrWords = 0,
-    };
-
-    pub const Tag = enum(u16) {
-        void,
-        int32,
-        _,
-    };
-
-    pub const Reader = struct {
-        reader: capnp.Struct.Reader,
-
-        pub fn which(self: Reader) Tag {
-            return @enumFromInt(self.reader.readIntField(u16, 0));
-        }
-
-        pub fn getInt32(self: Reader) i32 {
-            std.debug.assert(self.getTag() == .int32);
-            return self.reader.readIntField(i32, 1);
-        }
-    };
-
-    pub const Builder = struct {
-        builder: capnp.Struct.Builder,
-
-        pub fn setVoid(self: *Builder) void {
-            self.builder.writeIntField(u16, 0, 0);
-        }
-
-        pub fn getInt32(self: *Builder) i32 {
-            std.debug.assert(self.which() == .int32);
-            return self.builder.readIntField(i32, 1);
-        }
-
-        pub fn setInt32(self: *Builder, value: i32) void {
-            self.builder.writeIntField(u16, 0, 1);
-            self.builder.writeIntField(i32, 1, value);
-        }
-
-        pub fn which(self: *Builder) Tag {
-            return @enumFromInt(self.builder.readIntField(u16, 0));
-        }
-    };
-};
-
-pub const ULists = struct {
-    pub const _Metadata = capnp.StructMetadata{
-        .dataWords = 0,
-        .ptrWords = 1,
-    };
-
-    pub const Reader = struct {
-        reader: capnp.Struct.Reader,
-
-        pub fn getUnionTests(self: Reader) capnp.Error!capnp.CompositeListReader(UnionTest) {
-            return self.reader.readPtrField(capnp.CompositeListReader(UnionTest), 0);
-        }
-    };
-
-    pub const Builder = struct {
-        builder: capnp.Struct.Builder,
-
-        pub fn getUnionTests(self: *Builder) capnp.CompositeListBuilder(UnionTest) {
-            return self.builder.buildPtrField(capnp.CompositeListBuilder(UnionTest), 0);
-        }
-    };
-};
-
-test "struct with union" {
-    var file = try std.fs.cwd().openFile("capnp-tests/04_unions.bin", .{});
-    defer file.close();
-
-    var message = try capnp.Message.fromFile(file, std.testing.allocator);
-    defer message.deinit(std.testing.allocator);
-
-    const s = try message.getRootStruct(ULists);
-    var it = (try s.getUnionTests()).iter();
-    while (it.next()) |x| {
-        std.debug.print("{}\n", .{x.which()});
-    }
-}
-
-test "struct with union (building)" {
-    var message = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-
-    try message.init();
-    defer message.deinit();
-
-    var lists = try message.initRootStruct(ULists);
-
-    var list = lists.getUnionTests();
-    try list.init(3);
-
-    {
-        var x = list.get(0);
-        x.setInt32(77);
-        try std.testing.expectEqual(UnionTest.Tag.int32, x.which());
-        try std.testing.expectEqual(@as(i32, 77), x.getInt32());
-    }
-    {
-        var x = list.get(1);
-        x.setInt32(88);
-        try std.testing.expectEqual(UnionTest.Tag.int32, x.which());
-        try std.testing.expectEqual(@as(i32, 88), x.getInt32());
-
-        x.setVoid();
-        try std.testing.expectEqual(UnionTest.Tag.void, x.which());
-    }
-    {
-        var x = list.get(2);
-        x.setInt32(99);
-        try std.testing.expectEqual(UnionTest.Tag.int32, x.which());
-        try std.testing.expectEqual(@as(i32, 99), x.getInt32());
-    }
-}
-
-pub const Defaults = struct {
-    pub const _Metadata = capnp.StructMetadata{
-        .dataWords = 1,
-        .ptrWords = 0,
-    };
-    pub const Reader = struct {
-        reader: capnp.Struct.Reader,
-
-        pub fn getInt32(self: Reader) i32 {
-            return 17 ^ self.reader.readIntField(i32, 0);
-        }
-    };
-
-    pub const Builder = struct {
-        builder: capnp.Struct.Builder,
-
-        pub fn setInt32(self: Builder, value: i32) void {
-            return self.builder.writeIntField(i32, 0, value ^ 17);
-        }
-
-        pub fn getInt32(self: Builder) i32 {
-            return 17 ^ self.builder.readIntField(i32, 0);
-        }
-    };
-};
-
-test "default values" {
-    var file = try std.fs.cwd().openFile("capnp-tests/05_default_values.bin", .{});
-    defer file.close();
-
-    var message = try capnp.Message.fromFile(file, std.testing.allocator);
-    defer message.deinit(std.testing.allocator);
-
-    const s = try message.getRootStruct(Defaults);
-    try std.testing.expectEqual(
-        @as(i32, 17),
-        s.getInt32(),
-    );
-    // TODO: default for pointers. This is easier than it seems!
-}
-
-test "default values (build)" {
-    var message = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-
-    try message.init();
-    defer message.deinit();
-
-    var s = try message.initRootStruct(Defaults);
-
-    s.setInt32(100);
-    try std.testing.expectEqual(@as(i32, 100), s.getInt32());
-}
-
-pub const BitsAndFloats = struct {
-    pub const _Metadata = capnp.StructMetadata{ .ptrWords = 0, .dataWords = 2 };
-
-    pub const Reader = struct {
-        reader: capnp.Struct.Reader,
-
-        pub fn getFloat32(self: Reader) f32 {
-            return self.reader.readFloatField(f32, 0);
-        }
-
-        pub fn getFloat64(self: Reader) f64 {
-            return self.reader.readFloatField(f64, 1);
-        }
-
-        pub fn getBit(self: Reader) bool {
-            return self.reader.readBoolField(32);
-        }
-    };
-
-    pub const Builder = struct {
-        builder: capnp.Struct.Builder,
-
-        pub fn getFloat32(self: Builder) f32 {
-            return self.builder.readFloatField(f32, 0);
-        }
-
-        pub fn getFloat64(self: Builder) f64 {
-            return self.builder.readFloatField(f64, 1);
-        }
-
-        pub fn setFloat32(self: Builder, value: f32) void {
-            return self.builder.writeFloatField(f32, 0, value);
-        }
-
-        pub fn setFloat64(self: Builder, value: f64) void {
-            return self.builder.writeFloatField(f64, 1, value);
-        }
-
-        pub fn getBit(self: Builder) bool {
-            return self.builder.readBoolField(32);
-        }
-
-        pub fn setBit(self: Builder, value: bool) void {
-            return self.builder.writeBoolField(32, value);
-        }
-    };
-};
-
-test "bits and floats" {
-    var file = try std.fs.cwd().openFile("capnp-tests/07_bits_and_floats.bin", .{});
-    defer file.close();
-
-    var message = try capnp.Message.fromFile(file, std.testing.allocator);
-    defer message.deinit(std.testing.allocator);
-
-    const s = try message.getRootStruct(BitsAndFloats);
-    try std.testing.expectEqual(
-        @as(f32, 3.141),
-        s.getFloat32(),
-    );
-    try std.testing.expectEqual(
-        @as(f64, 3.14159),
-        s.getFloat64(),
-    );
-    try std.testing.expectEqual(true, s.getBit());
-
-    // TODO: default for pointers. This is easier than it seems!
-}
-
-test "bits and floats (build)" {
-    var message = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-
-    try message.init();
-    defer message.deinit();
-
-    var s = try message.initRootStruct(BitsAndFloats);
-
-    s.setFloat32(23.0);
-    try std.testing.expectEqual(@as(f32, 23.0), s.getFloat32());
-
-    try std.testing.expectEqual(false, s.getBit());
-    s.setBit(true);
-    try std.testing.expectEqual(true, s.getBit());
-
-    // TODO: default for pointers. This is easier than it seems!
 }

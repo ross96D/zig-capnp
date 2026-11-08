@@ -96,6 +96,8 @@ pub const ImportAlias = struct {
     path: []const u8,
 };
 
+pub const SourceInfoMap = std.AutoHashMap(u64, schema.Node.SourceInfo.Reader);
+
 fn importBaseName(name: []const u8) []const u8 {
     const without_slash = if (name.len > 0 and name[0] == '/') name[1..] else name;
     const base = if (std.mem.lastIndexOfScalar(u8, without_slash, '/')) |i| without_slash[i + 1 ..] else without_slash;
@@ -153,6 +155,22 @@ pub fn collectImports(
     }
 
     return aliases.toOwnedSlice(allocator);
+}
+
+pub fn collectSourceInfo(
+    allocator: std.mem.Allocator,
+    request: schema.CodeGeneratorRequest.Reader,
+) !SourceInfoMap {
+    var source_info = SourceInfoMap.init(allocator);
+    errdefer source_info.deinit();
+
+    const infos = try request.sourceInfo();
+    for (0..infos.length) |i| {
+        const info = infos.get(@intCast(i));
+        try source_info.put(info.id(), info);
+    }
+
+    return source_info;
 }
 
 pub fn Refactor(comptime W: type) type {
@@ -215,6 +233,7 @@ pub fn Refactor(comptime W: type) type {
             writer: *W,
             indenter: Indenter,
             nodes: *const NodeMap,
+            source_info: ?*const SourceInfoMap = null,
             allocator: std.mem.Allocator = std.heap.page_allocator,
             current_file_id: u64 = 0,
             imports: []const ImportAlias = &.{},
@@ -302,6 +321,41 @@ pub fn Refactor(comptime W: type) type {
 
             pub fn writeIndent(self: *WriteContext) E!void {
                 try self.indenter.write(self.writer);
+            }
+
+            fn nodeDoc(ctx: *WriteContext, node: schema.Node.Reader) E!?[]const u8 {
+                const source_info = ctx.source_info orelse return null;
+                const info = source_info.get(node.id()) orelse return null;
+                const doc = try info.docComment();
+                return if (doc.len == 0) null else doc;
+            }
+
+            fn memberDoc(ctx: *WriteContext, node: schema.Node.Reader, index: usize) E!?[]const u8 {
+                const source_info = ctx.source_info orelse return null;
+                const info = source_info.get(node.id()) orelse return null;
+                const members = try info.members();
+                if (index >= members.length) return null;
+                const doc = try members.get(@intCast(index)).docComment();
+                return if (doc.len == 0) null else doc;
+            }
+
+            fn writeDocComment(ctx: *WriteContext, comptime prefix: []const u8, doc: ?[]const u8) E!bool {
+                const text = doc orelse return false;
+                const trimmed = std.mem.trim(u8, text, "\r\n");
+                if (trimmed.len == 0) return false;
+
+                var lines = std.mem.splitScalar(u8, trimmed, '\n');
+                while (lines.next()) |raw_line| {
+                    const line = std.mem.trimEnd(u8, raw_line, " \t\r");
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll(prefix);
+                    if (line.len != 0) {
+                        try ctx.writer.writeByte(' ');
+                        try ctx.writer.writeAll(line);
+                    }
+                    try ctx.writer.writeByte('\n');
+                }
+                return true;
             }
 
             pub fn openGetter(ctx: *WriteContext, field: schema.Field.Reader, gt: getter_type) E!void {
@@ -457,15 +511,15 @@ pub fn Refactor(comptime W: type) type {
 
             switch (value.which()) {
                 .@"struct" => {
-                    try writeStaticConst(ctx, name, typ, (try value.@"struct"()).?);
+                    try writeStaticConst(ctx, name, typ, (try value.@"struct"()).?, null);
                     return;
                 },
                 .list => {
-                    try writeStaticConst(ctx, name, typ, (try value.list()).?);
+                    try writeStaticConst(ctx, name, typ, (try value.list()).?, null);
                     return;
                 },
                 .anyPointer => {
-                    try writeStaticConst(ctx, name, typ, (try value.anyPointer()).?);
+                    try writeStaticConst(ctx, name, typ, (try value.anyPointer()).?, null);
                     return;
                 },
                 else => {
@@ -584,6 +638,7 @@ pub fn Refactor(comptime W: type) type {
             arena: std.mem.Allocator,
             requested: schema.CodeGeneratorRequest.RequestedFile.Reader,
             nodes: *const NodeMap,
+            source_info: *const SourceInfoMap,
             imports: []const ImportAlias,
         ) E![]u8 {
             var used = std.AutoHashMap(u64, void).init(allocator);
@@ -596,6 +651,7 @@ pub fn Refactor(comptime W: type) type {
                     .writer = &discard.writer,
                     .indenter = Indenter{},
                     .nodes = nodes,
+                    .source_info = source_info,
                     .allocator = allocator,
                     .current_file_id = requested.id(),
                     .imports = imports,
@@ -619,6 +675,7 @@ pub fn Refactor(comptime W: type) type {
                 .writer = &output.writer,
                 .indenter = Indenter{},
                 .nodes = nodes,
+                .source_info = source_info,
                 .allocator = allocator,
                 .current_file_id = requested.id(),
                 .imports = used_aliases.items,
@@ -635,6 +692,9 @@ pub fn Refactor(comptime W: type) type {
                     if (ctx.emit_header) {
                         try ctx.writer.print("// {s}\n", .{name});
                         try ctx.writer.writeAll("// This file is automatically generated. DO NOT EDIT.\n\n");
+                        if (try ctx.writeDocComment("//!", try ctx.nodeDoc(node))) {
+                            try ctx.writer.writeByte('\n');
+                        }
                         try ctx.writer.writeAll("const _Root = @This();\nconst capnp = @import(\"capnp\");\n");
                         for (ctx.imports) |import_| {
                             try ctx.writer.writeAll("const ");
@@ -654,6 +714,7 @@ pub fn Refactor(comptime W: type) type {
                 },
 
                 .@"enum" => {
+                    _ = try ctx.writeDocComment("///", try ctx.nodeDoc(node));
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("pub const ");
                     try writeReplaceKeyword(name, ctx.writer);
@@ -663,6 +724,7 @@ pub fn Refactor(comptime W: type) type {
                     const enumerants = try node.@"enum"().?.enumerants();
                     for (0..enumerants.length) |i| {
                         const enumerant = enumerants.get(@intCast(i));
+                        _ = try ctx.writeDocComment("///", try ctx.memberDoc(node, i));
                         try ctx.writeIndent();
                         try writeReplaceKeyword(try enumerant.name(), ctx.writer);
                         try ctx.writer.print(" = {d},\n", .{i});
@@ -686,6 +748,7 @@ pub fn Refactor(comptime W: type) type {
                     const const_node = node.@"const"().?;
                     const typ = try const_node.type();
                     const value = try const_node.value();
+                    const doc = try ctx.nodeDoc(node);
 
                     switch (value.which()) {
                         .void,
@@ -705,15 +768,15 @@ pub fn Refactor(comptime W: type) type {
                         .@"enum",
                         => {},
                         .@"struct" => {
-                            try writeStaticConst(ctx, name, typ, (try value.@"struct"()).?);
+                            try writeStaticConst(ctx, name, typ, (try value.@"struct"()).?, doc);
                             return;
                         },
                         .list => {
-                            try writeStaticConst(ctx, name, typ, (try value.list()).?);
+                            try writeStaticConst(ctx, name, typ, (try value.list()).?, doc);
                             return;
                         },
                         .anyPointer => {
-                            try writeStaticConst(ctx, name, typ, (try value.anyPointer()).?);
+                            try writeStaticConst(ctx, name, typ, (try value.anyPointer()).?, doc);
                             return;
                         },
                         else => {
@@ -723,6 +786,7 @@ pub fn Refactor(comptime W: type) type {
                         },
                     }
 
+                    _ = try ctx.writeDocComment("///", doc);
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("pub const ");
                     try writeReplaceKeyword(name, ctx.writer);
@@ -736,6 +800,7 @@ pub fn Refactor(comptime W: type) type {
                 .annotation => {},
 
                 .@"struct" => {
+                    _ = try ctx.writeDocComment("///", try ctx.nodeDoc(node));
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("pub const ");
                     try writeReplaceKeyword(name, ctx.writer);
@@ -755,6 +820,7 @@ pub fn Refactor(comptime W: type) type {
                         for (0..fields.length) |i| {
                             const field = fields.get(@intCast(i));
                             if (field.discriminantValue() == 0xffff) continue;
+                            _ = try ctx.writeDocComment("///", try ctx.memberDoc(node, i));
                             try ctx.writeIndent();
                             try writeReplaceKeyword(try field.name(), ctx.writer);
                             try ctx.writer.print(" = {},\n", .{field.discriminantValue()});
@@ -838,6 +904,7 @@ pub fn Refactor(comptime W: type) type {
                             struct_.discriminantOffset(),
                             fields.get(@intCast(i)),
                             .reader,
+                            try ctx.memberDoc(node, i),
                         );
                         try ctx.writer.writeAll("\n\n");
                     }
@@ -890,6 +957,7 @@ pub fn Refactor(comptime W: type) type {
                             struct_.discriminantOffset(),
                             fields.get(@intCast(i)),
                             .builder,
+                            try ctx.memberDoc(node, i),
                         );
                         try ctx.writer.writeAll("\n\n");
                         try writeSetter(ctx, struct_.discriminantOffset(), fields.get(@intCast(i)));
@@ -958,6 +1026,7 @@ pub fn Refactor(comptime W: type) type {
             name: []const u8,
             typ: schema.Type.Reader,
             source: capnp.AnyPointerReader,
+            doc: ?[]const u8,
         ) E!void {
             var builder = capnp.MessageBuilder{ .allocator = ctx.allocator };
             try builder.init();
@@ -1000,6 +1069,7 @@ pub fn Refactor(comptime W: type) type {
             try ctx.writeIndent();
             try ctx.writer.writeAll("};\n\n");
 
+            _ = try ctx.writeDocComment("///", doc);
             try ctx.writeIndent();
             try ctx.writer.writeAll("pub fn ");
             try writeReplaceKeyword(name, ctx.writer);
@@ -1061,9 +1131,16 @@ pub fn Refactor(comptime W: type) type {
             }
         }
 
-        pub fn writeGetter(ctx: *WriteContext, discriminantOffset: u32, field: schema.Field.Reader, gt: getter_type) E!void {
+        pub fn writeGetter(
+            ctx: *WriteContext,
+            discriminantOffset: u32,
+            field: schema.Field.Reader,
+            gt: getter_type,
+            doc: ?[]const u8,
+        ) E!void {
             const target = gt.toString();
 
+            _ = try ctx.writeDocComment("///", doc);
             try ctx.openGetter(field, gt);
 
             if (field.discriminantValue() != 0xffff) {
@@ -1406,7 +1483,7 @@ test "field" {
     const field = (try struct_reader.fields()).get(2);
 
     writer.end = 0;
-    try M.writeGetter(&ctx, struct_reader.discriminantOffset(), field, .reader);
+    try M.writeGetter(&ctx, struct_reader.discriminantOffset(), field, .reader, null);
     try std.testing.expectEqualStrings("pub fn int32(self: @This()) i32 {\n    return self.reader.readIntField(i32, 0) ^ 0;\n}", writer.buffered());
 }
 
@@ -1432,6 +1509,9 @@ test "compiler" {
         try node_map.put(node.id(), node);
     }
 
+    var source_info = try collectSourceInfo(std.testing.allocator, request);
+    defer source_info.deinit();
+
     const M = Refactor(std.Io.Writer);
 
     var output = std.Io.Writer.Allocating.init(std.testing.allocator);
@@ -1448,6 +1528,7 @@ test "compiler" {
         .writer = &output.writer,
         .indenter = M.Indenter{},
         .nodes = &node_map,
+        .source_info = &source_info,
         .allocator = std.testing.allocator,
         .current_file_id = requested.id(),
         .imports = imports,
@@ -1462,6 +1543,82 @@ test "compiler" {
     try std.testing.expect(code.len > 0);
     try std.testing.expect(std.mem.startsWith(u8, code, "// "));
     try std.testing.expect(std.mem.indexOf(u8, code, "pub const") != null);
+    try std.testing.expect(std.mem.indexOf(u8, code, "/// Schema for a field of a struct.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, code, "/// All nodes parsed by the compiler") != null);
+}
+
+fn generateRequestForTest(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        path,
+        allocator,
+        .limited(64 * 1024 * 1024),
+    );
+    defer allocator.free(bytes);
+
+    var message = try capnp.Message.fromBytes(bytes, allocator);
+    defer message.deinit(allocator);
+
+    const M = Refactor(std.Io.Writer);
+
+    const request = try message.getRootStruct(schema.CodeGeneratorRequest.Reader, schema.CodeGeneratorRequest.reader_trait);
+    const nodes = try request.nodes();
+
+    var node_map = M.NodeMap.init(allocator);
+    defer node_map.deinit();
+    for (0..nodes.length) |i| {
+        const node = nodes.get(@intCast(i));
+        try node_map.put(node.id(), node);
+    }
+
+    var source_info = try collectSourceInfo(allocator, request);
+    defer source_info.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const files = try request.requestedFiles();
+    const requested = files.get(0);
+    const imports = try collectImports(arena.allocator(), requested);
+
+    return M.generateFile(allocator, arena.allocator(), requested, &node_map, &source_info, imports);
+}
+
+test "doc comments" {
+    const features_code = try generateRequestForTest(
+        std.testing.allocator,
+        "capnp-tests/codegen-request/09_codegen_features.request.bin",
+    );
+    defer std.testing.allocator.free(features_code);
+
+    try std.testing.expect(std.mem.indexOf(u8, features_code, "//! File-level documentation for the codegen feature fixture.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, features_code, "/// Documentation for the Color enum.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, features_code, "/// Documentation for the red enumerant.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, features_code, "/// Documentation for the Features struct.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, features_code, "/// Documentation for the test constant.") != null);
+    try std.testing.expectEqual(
+        @as(usize, 2),
+        std.mem.count(u8, features_code, "/// Documentation for the name field."),
+    );
+    try std.testing.expectEqual(
+        @as(usize, 2),
+        std.mem.count(u8, features_code, "/// Documentation for the blob field."),
+    );
+
+    const union_code = try generateRequestForTest(
+        std.testing.allocator,
+        "capnp-tests/codegen-request/04_unions.request.bin",
+    );
+    defer std.testing.allocator.free(union_code);
+
+    try std.testing.expectEqual(
+        @as(usize, 3),
+        std.mem.count(u8, union_code, "/// Documentation for the void union field."),
+    );
+    try std.testing.expectEqual(
+        @as(usize, 3),
+        std.mem.count(u8, union_code, "/// Documentation for the int32 union field."),
+    );
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -1493,6 +1650,9 @@ pub fn main(init: std.process.Init) !void {
         try node_map.put(node.id(), node);
     }
 
+    var source_info = try collectSourceInfo(allocator, request);
+    defer source_info.deinit();
+
     const M = Refactor(std.Io.Writer);
     const files = try request.requestedFiles();
 
@@ -1503,7 +1663,7 @@ pub fn main(init: std.process.Init) !void {
         for (0..files.length) |i| {
             const requested = files.get(@intCast(i));
             const imports = try collectImports(arena, requested);
-            const code = try M.generateFile(allocator, arena, requested, &node_map, imports);
+            const code = try M.generateFile(allocator, arena, requested, &node_map, &source_info, imports);
             defer allocator.free(code);
             try out_writer.interface.writeAll(code);
         }
@@ -1515,7 +1675,7 @@ pub fn main(init: std.process.Init) !void {
     for (0..files.length) |i| {
         const requested = files.get(@intCast(i));
         const imports = try collectImports(arena, requested);
-        const code = try M.generateFile(allocator, arena, requested, &node_map, imports);
+        const code = try M.generateFile(allocator, arena, requested, &node_map, &source_info, imports);
         defer allocator.free(code);
 
         const out_path = try outputFilePath(arena, try requested.filename());
