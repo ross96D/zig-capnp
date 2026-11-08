@@ -88,6 +88,7 @@ pub const Error = error{
     RootAlreadyInitialized,
     NotInitialized,
     AlreadyInitialized,
+    InvalidText,
 };
 
 pub const BuildError = Allocator.Error || Error;
@@ -226,8 +227,8 @@ pub const ReadContext = struct {
                     const words = @as(u32, s.data_words) + s.ptr_words;
                     const word = try self.checkObject(content_segment, content_word_offset, words);
 
-                    try self.depth_counter.increment(1);
-                    try self.traversal_counter.increment(words);
+                    self.depth_counter.increment(1) catch return Error.DepthLimitExceeded;
+                    self.traversal_counter.increment(words) catch return Error.TraversalLimitExceeded;
 
                     self.segment = content_segment;
                     self.offset_words = word;
@@ -252,8 +253,13 @@ pub const ReadContext = struct {
                     };
                     const word = try self.checkObject(content_segment, content_word_offset, words);
 
-                    try self.depth_counter.increment(1);
-                    try self.traversal_counter.increment(words);
+                    // Void/zero-sized elements occupy no wire space, but they
+                    // count as one word each for traversal-limit purposes.
+                    const traversal_words: u32 =
+                        if (l.element_size == 0) l.elements_or_words else words;
+
+                    self.depth_counter.increment(1) catch return Error.DepthLimitExceeded;
+                    self.traversal_counter.increment(traversal_words) catch return Error.TraversalLimitExceeded;
 
                     self.segment = content_segment;
                     self.offset_words = word;
@@ -277,7 +283,9 @@ pub const ReadContext = struct {
         const seg = self.segments[self.segment];
         if (start + length > seg.len) return Error.OutOfBounds;
 
-        return seg[@intCast(start)..][0 .. length - 1];
+        const text = seg[@intCast(start)..][0..length];
+        if (text[length - 1] != 0) return Error.InvalidText;
+        return text[0 .. length - 1];
     }
 
     pub fn fromSegments(segments: [][]u8, traversal_counter: *Counter) ReadContext {
@@ -289,10 +297,8 @@ pub const ReadContext = struct {
         };
     }
 
-    pub fn format(value: ReadContext, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = options;
-        _ = fmt;
-        try writer.print("{{segments = {}, segment = {}, offsetWords = {}}}", .{ value.segments.len, value.segment, value.offset_words });
+    pub fn format(self: ReadContext, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("{{segments = {}, segment = {}, offset_words = {}}}", .{ self.segments.len, self.segment, self.offset_words });
     }
 };
 
@@ -333,7 +339,7 @@ pub const StructReader = struct {
         const bucket: u29 = comptime offset / 8;
         const shift: u3 = comptime offset % 8;
 
-        return self.readIntField(u8, bucket) >> shift == 1;
+        return ((self.readIntField(u8, bucket) >> shift) & 1) != 0;
     }
 
     pub fn readPtrField(self: StructReader, comptime T: type, ptrNo: u16) Error!T {
@@ -347,7 +353,7 @@ pub const StructReader = struct {
         return try T.fromReadContext(context);
     }
 
-    pub fn readVoid(_: StructBuilder) void {}
+    pub fn readVoid(_: StructReader) void {}
 
     pub fn readStringField(self: StructReader, ptrNo: u16) Error![]u8 {
         return (try self.readPtrField(ListReader(u8), ptrNo)).getString();
@@ -384,10 +390,8 @@ pub const StructReader = struct {
         return .{ .context = context, .data_words = 0, .ptr_words = 0 };
     }
 
-    pub fn format(value: StructReader, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = options;
-        _ = fmt;
-        try writer.print("{{context = {}, dataWords = {}, ptrWords = {}}}", .{ value.context, value.data_words, value.ptr_words });
+    pub fn format(self: StructReader, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("{{context = {}, dataWords = {}, ptrWords = {}}}", .{ self.context, self.data_words, self.ptr_words });
     }
 };
 
@@ -401,10 +405,12 @@ pub const StructBuilder = struct {
     }
 
     pub fn writeIntField(self: StructBuilder, comptime T: type, offset: u32, value: T) void {
+        std.debug.assert(@as(u64, @sizeOf(T)) * offset + @sizeOf(T) <= @as(u64, self.data_words) * 8);
         return self.context.writeInt(T, offset, value);
     }
 
     pub fn buildPtrField(self: StructBuilder, comptime T: type, offset: u29) T {
+        std.debug.assert(offset < self.ptr_words);
         var ptr = self.context;
         ptr.relativeWords(self.data_words + offset);
         return T.fromBuildContext(ptr);
@@ -434,7 +440,7 @@ pub const StructBuilder = struct {
         const bucket: u29 = comptime offset / 8;
         const shift: u3 = comptime offset % 8;
 
-        return self.readIntField(u8, bucket) >> shift == 1;
+        return ((self.readIntField(u8, bucket) >> shift) & 1) != 0;
     }
 
     pub fn writeBoolField(self: StructBuilder, comptime offset: u32, value: bool) void {
@@ -444,7 +450,7 @@ pub const StructBuilder = struct {
 
         const old = self.readIntField(u8, bucket);
 
-        self.context.writeInt(u8, bucket, ~mask & old | if (value) mask else 0);
+        self.writeIntField(u8, bucket, ~mask & old | if (value) mask else 0);
     }
 };
 
@@ -555,11 +561,9 @@ pub fn ListBuilder(comptime T: type) type {
         }
 
         pub fn set(self: *Self, index: u32, value: T) void {
-            if (self.context) |context| {
-                context.writeInt(T, index, value);
-            } else {
-                return undefined;
-            }
+            std.debug.assert(self.context != null);
+            std.debug.assert(index < self.length);
+            self.context.?.writeInt(T, index, value);
         }
 
         pub fn get(self: Self, ix: u32) T {
@@ -698,6 +702,13 @@ pub fn CompositeListReader(comptime T: type) type {
                             const stride = @as(u64, struct_ptr.data_words) + struct_ptr.ptr_words;
                             if (@as(u64, length) * stride > list_ptr.elements_or_words) {
                                 return Error.OutOfBounds;
+                            }
+
+                            // Zero-sized structs still count as one word per
+                            // element against the traversal limit.
+                            if (stride == 0) {
+                                _context.traversal_counter.increment(length) catch
+                                    return Error.TraversalLimitExceeded;
                             }
 
                             _context.offset_words += 1;

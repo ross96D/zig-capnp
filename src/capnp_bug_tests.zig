@@ -174,6 +174,18 @@ const Empty = struct {
     };
 };
 
+const ZeroItem = struct {
+    pub const _Metadata = capnp.StructMetadata{ .dataWords = 0, .ptrWords = 0 };
+
+    pub const Reader = struct {
+        reader: capnp.Struct.Reader,
+    };
+
+    pub const Builder = struct {
+        builder: capnp.Struct.Builder,
+    };
+};
+
 const Dummy = struct {
     pub const _Metadata = capnp.StructMetadata{ .dataWords = 0, .ptrWords = 0 };
 
@@ -354,6 +366,77 @@ test "BUG: list traversal is not counted against the traversal limit" {
     try expectAnyError(s.readPtrField(capnp.List(u64).Reader, 0));
 }
 
+test "regression: void list counts elements against the traversal limit" {
+    var data: [16]u8 = @splat(0);
+    writeWord(data[0..], 0, structPointer(0, 0, 1));
+    // 100,000 zero-sized elements, taking no wire space.
+    writeWord(data[0..], 1, listPointer(0, 0, 100_000));
+
+    var segments = [_][]u8{data[0..]};
+    var counter = capnp.Counter{ .limit = 16 };
+    const s = try capnp.StructReader.fromReadContext(readContext(segments[0..], &counter));
+
+    try expectAnyError(s.readPtrField(capnp.List(void).Reader, 0));
+}
+
+test "regression: zero-sized struct list counts elements against the traversal limit" {
+    var data: [24]u8 = @splat(0);
+    writeWord(data[0..], 0, structPointer(0, 0, 1));
+    // Inline composite list with zero element words; the tag at word 2 says
+    // there are 100,000 zero-sized elements.
+    writeWord(data[0..], 1, listPointer(0, 7, 0));
+    writeWord(data[0..], 2, structPointer(100_000, 0, 0));
+
+    var segments = [_][]u8{data[0..]};
+    var counter = capnp.Counter{ .limit = 16 };
+    const s = try capnp.StructReader.fromReadContext(readContext(segments[0..], &counter));
+
+    try expectAnyError(s.readPtrField(capnp.CompositeListReader(ZeroItem), 0));
+}
+
+test "regression: text without a NUL terminator is rejected" {
+    var data: [32]u8 = @splat(0);
+    writeWord(data[0..], 0, structPointer(0, 0, 1));
+    writeWord(data[0..], 1, listPointer(0, 2, 4));
+    data[16] = 'a';
+    data[17] = 'b';
+    data[18] = 'c';
+    data[19] = 'd';
+
+    var segments = [_][]u8{data[0..]};
+    var counter = capnp.Counter{ .limit = 1000 };
+    const s = try capnp.StructReader.fromReadContext(readContext(segments[0..], &counter));
+
+    try expectAnyError(s.readStringField(0));
+}
+
+test "regression: deeply nested structs hit the depth limit" {
+    const nested_words = 100;
+    var data: [nested_words * 8]u8 = @splat(0);
+
+    for (0..nested_words - 1) |i| {
+        writeWord(data[0..], i, structPointer(0, 0, 1)); // points at the next word
+    }
+    writeWord(data[0..], nested_words - 1, structPointer(-1, 0, 0));
+
+    var segments = [_][]u8{data[0..]};
+    var counter = capnp.Counter{ .limit = 1_000_000 };
+    var s = try capnp.StructReader.fromReadContext(readContext(segments[0..], &counter));
+
+    var depth: u32 = 0;
+    while (true) {
+        const next = s.readPtrField(capnp.StructReader, 0) catch |err| {
+            try testing.expect(err == capnp.Error.DepthLimitExceeded);
+            break;
+        };
+        s = next;
+        depth += 1;
+    }
+
+    // The root is depth 1; depths 2..64 are readable.
+    try testing.expectEqual(@as(u32, 63), depth);
+}
+
 test "BUG: ReadContext custom format is not used by std.fmt (Zig 0.17)" {
     var data: [8]u8 = @splat(0xab);
 
@@ -361,7 +444,7 @@ test "BUG: ReadContext custom format is not used by std.fmt (Zig 0.17)" {
     var counter = capnp.Counter{ .limit = 1000 };
     const context = readContext(segments[0..], &counter);
 
-    const formatted = try std.fmt.allocPrint(testing.allocator, "{}", .{context});
+    const formatted = try std.fmt.allocPrint(testing.allocator, "{f}", .{context});
     defer testing.allocator.free(formatted);
 
     // The intended format is `{segments = 1, segment = 0, offsetWords = 0}`;
@@ -378,7 +461,7 @@ test "BUG: StructReader custom format is not used by std.fmt (Zig 0.17)" {
     var counter = capnp.Counter{ .limit = 1000 };
     const s = try capnp.StructReader.fromReadContext(readContext(segments[0..], &counter));
 
-    const formatted = try std.fmt.allocPrint(testing.allocator, "{}", .{s});
+    const formatted = try std.fmt.allocPrint(testing.allocator, "{f}", .{s});
     defer testing.allocator.free(formatted);
 
     try testing.expect(std.mem.indexOf(u8, formatted, "dataWords =") != null);
