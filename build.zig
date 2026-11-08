@@ -39,6 +39,9 @@ pub fn build(b: *std.Build) void {
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
         .root_source_file = b.path("src/refactor.zig"),
+        .imports = &.{
+            .{ .name = "capnp", .module = capnp_mod },
+        },
     });
 
     const compiler_exe = b.addExecutable(.{
@@ -49,6 +52,26 @@ pub fn build(b: *std.Build) void {
     });
 
     b.installArtifact(compiler_exe);
+
+    const codegen_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("capnp-tests/codegen-zig/codegen.zig"),
+        .imports = &.{
+            .{ .name = "capnp", .module = capnp_mod },
+        },
+    });
+
+    const codegen_tests_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/codegen_tests.zig"),
+        .imports = &.{
+            .{ .name = "capnp", .module = capnp_mod },
+            .{ .name = "capnpc", .module = compiler_mod },
+            .{ .name = "codegen", .module = codegen_mod },
+        },
+    });
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
@@ -72,10 +95,21 @@ pub fn build(b: *std.Build) void {
 
     const run_compiler_tests = b.addRunArtifact(compiler_tests);
 
+    const codegen_tests = b.addTest(.{
+        .root_module = codegen_tests_mod,
+        .test_runner = .{
+            .mode = .simple,
+            .path = b.path("test_runner.zig"),
+        },
+    });
+
+    const run_codegen_tests = b.addRunArtifact(codegen_tests);
+
     // This creates a build step. It will be visible in the `zig build --help` menu,
     // and can be selected like this: `zig build test`
     // This will evaluate the `test` step rather than the default, which is "install".
     const test_step = b.step("test", "Run library and codegen tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_compiler_tests.step);
+    test_step.dependOn(&run_codegen_tests.step);
 }

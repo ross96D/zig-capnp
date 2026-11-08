@@ -2,5 +2,7 @@
 capnp-tests/*.c++
 capnp-tests/*.h
 capnp-tests/*.bin
+capnp-tests/codegen
+capnp-tests/codegen-zig
 .zig-cache
 zig-out

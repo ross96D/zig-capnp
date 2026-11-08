@@ -1,5 +1,5 @@
 const std = @import("std");
-const capnp = @import("capnp.zig");
+const capnp = @import("capnp");
 const _Schema = @This();
 
 const ReadOnlyBuilder = struct {
