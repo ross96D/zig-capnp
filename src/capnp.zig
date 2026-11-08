@@ -914,7 +914,7 @@ pub const MessageBuilder = struct {
         self.segment_store[len] = try self.allocator.alloc(u8, capacity);
         self.segment_store[len].len = 0;
         self.segment_capacity[len] = capacity;
-        self.next_segment_bytes = @min(capacity * 2, max_segment_bytes);
+        self.next_segment_bytes = @min(std.math.mul(u32, capacity, 2) catch max_segment_bytes, max_segment_bytes);
         self.segments = self.segment_store[0 .. len + 1];
         return len;
     }
