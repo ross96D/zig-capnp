@@ -455,9 +455,6 @@ pub const StructBuilder = struct {
 };
 
 /// Compile-time contract for a generated Cap'n Proto struct type `T`.
-///
-/// This replaces the implicit `T._Metadata` and `.reader`/`.builder` field
-/// conventions with an explicit, compiler-checked value.
 pub fn StructTrait(comptime T: type) type {
     return struct {
         data_words: u16,
