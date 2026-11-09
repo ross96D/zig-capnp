@@ -2,6 +2,8 @@ const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 
+pub const packing = @import("packed.zig");
+
 pub const Ptr = union(enum) {
     pub const Struct = packed struct(u64) {
         type: u2 = 0,
@@ -1456,5 +1458,6 @@ test "test MessageBuilder" {
 }
 
 test {
+    _ = @import("packed_tests.zig");
     _ = @import("capnp_bug_tests.zig");
 }
