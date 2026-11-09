@@ -53,6 +53,21 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(compiler_exe);
 
+    const packing_bench_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/packed_bench.zig"),
+    });
+
+    const packing_bench = b.addExecutable(.{
+        .name = "packed-bench",
+        .root_module = packing_bench_mod,
+    });
+
+    const bench_step = b.step("bench", "Run the packed encoding benchmark");
+    const run_packing_bench = b.addRunArtifact(packing_bench);
+    bench_step.dependOn(&run_packing_bench.step);
+
     const codegen_mod = b.createModule(.{
         .target = target,
         .optimize = optimize,

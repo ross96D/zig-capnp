@@ -6,6 +6,11 @@ pub const PackedError = error{
     SizeOverflow,
 };
 
+const BLOCK_WORDS = 4;
+const BLOCK_BYTES = BLOCK_WORDS * 8;
+const BLOCK_VECTOR = @Vector(BLOCK_BYTES, u8);
+const WORD_VECTOR = @Vector(8, u8);
+
 const WordIterator = struct {
     input: []const u8,
     offset: usize = 0,
@@ -43,6 +48,68 @@ const WordIterator = struct {
     }
 };
 
+fn blockMask(bytes: []const u8) u32 {
+    const block: BLOCK_VECTOR = bytes[0..BLOCK_BYTES].*;
+    return @bitCast(block != @as(BLOCK_VECTOR, @splat(0)));
+}
+
+fn wordTag(word: []const u8) u8 {
+    const value: WORD_VECTOR = word[0..8].*;
+    return @bitCast(value != @as(WORD_VECTOR, @splat(0)));
+}
+
+fn tagFromMask(mask: u32, index: usize) u8 {
+    const shift: u5 = @intCast(index * 8);
+    return @truncate(mask >> shift);
+}
+
+fn writePackedWord(writer: *std.Io.Writer, word: []const u8, tag: u8) !void {
+    var output: [9]u8 = undefined;
+    output[0] = tag;
+    var len: usize = 1;
+
+    if (tag == 0xff) {
+        @memcpy(output[1..9], word[0..8]);
+        len = 9;
+    } else {
+        var bits = tag;
+        while (bits != 0) {
+            const index: u3 = @intCast(@ctz(bits));
+            output[len] = word[index];
+            len += 1;
+            bits &= bits - 1;
+        }
+    }
+
+    try writer.writeAll(output[0..len]);
+}
+
+fn writeZeroRun(writer: *std.Io.Writer, bytes: []const u8, start: usize) !usize {
+    var count: usize = 1;
+    var offset = start + 8;
+
+    while (count < 256) {
+        const remaining = 256 - count;
+        if (remaining >= BLOCK_WORDS and offset + BLOCK_BYTES <= bytes.len) {
+            if (blockMask(bytes[offset..]) == 0) {
+                count += BLOCK_WORDS;
+                offset += BLOCK_BYTES;
+                continue;
+            }
+        }
+
+        if (offset + 8 > bytes.len) break;
+        if (@as(u64, @bitCast(bytes[offset..][0..8].*)) != 0) break;
+
+        count += 1;
+        offset += 8;
+    }
+
+    const run = [2]u8{ 0, @intCast(count - 1) };
+    try writer.writeAll(&run);
+    return offset;
+}
+
 /// Pack a standard Cap'n Proto message byte stream into `writer`.
 ///
 /// `bytes` must be word-aligned, as all serialized Cap'n Proto messages are.
@@ -50,41 +117,36 @@ pub fn pack(writer: *std.Io.Writer, bytes: []const u8) (PackedError || std.Io.Wr
     if (bytes.len % 8 != 0) return PackedError.InvalidPacked;
 
     var offset: usize = 0;
-    while (offset < bytes.len) {
-        const word = bytes[offset..][0..8];
 
-        if (allZero(word)) {
-            var count: usize = 1;
-            var next = offset + 8;
-            while (count < 256 and next + 8 <= bytes.len) {
-                if (!allZero(bytes[next..][0..8])) break;
-                count += 1;
-                next += 8;
-            }
-
-            try writer.writeByte(0);
-            try writer.writeByte(@intCast(count - 1));
-            offset = next;
+    while (offset + BLOCK_BYTES <= bytes.len) {
+        const mask = blockMask(bytes[offset..]);
+        if (mask == 0) {
+            offset = try writeZeroRun(writer, bytes, offset);
             continue;
         }
 
-        var tag: u8 = 0;
-        for (word, 0..) |byte, index| {
-            if (byte != 0) {
-                const bit: u3 = @intCast(index);
-                tag |= @as(u8, 1) << bit;
+        var word_index: usize = 0;
+        while (word_index < BLOCK_WORDS) : (word_index += 1) {
+            const tag = tagFromMask(mask, word_index);
+            if (tag == 0) {
+                offset = try writeZeroRun(writer, bytes, offset);
+                break;
             }
-        }
 
-        try writer.writeByte(tag);
-        for (word, 0..) |byte, index| {
-            const bit: u3 = @intCast(index);
-            if ((tag & (@as(u8, 1) << bit)) != 0) {
-                try writer.writeByte(byte);
-            }
+            try writePackedWord(writer, bytes[offset..][0..8], tag);
+            offset += 8;
         }
+    }
 
-        offset += 8;
+    while (offset < bytes.len) {
+        const word = bytes[offset..][0..8];
+        const tag = wordTag(word);
+        if (tag == 0) {
+            offset = try writeZeroRun(writer, bytes, offset);
+        } else {
+            try writePackedWord(writer, word, tag);
+            offset += 8;
+        }
     }
 }
 
@@ -92,8 +154,36 @@ pub fn pack(writer: *std.Io.Writer, bytes: []const u8) (PackedError || std.Io.Wr
 ///
 /// There is no fixed maximum output size.
 pub fn unpack(writer: *std.Io.Writer, input: []const u8) (PackedError || std.Io.Writer.Error)!void {
-    var words = WordIterator{ .input = input };
-    while (try words.next()) |word| {
+    var offset: usize = 0;
+
+    while (offset < input.len) {
+        const tag = input[offset];
+        offset += 1;
+
+        if (tag == 0) {
+            if (offset >= input.len) return PackedError.InvalidPacked;
+            const count = @as(usize, input[offset]) + 1;
+            offset += 1;
+            try writer.splatByteAll(0, count * 8);
+            continue;
+        }
+
+        if (tag == 0xff) {
+            if (input.len - offset < 8) return PackedError.InvalidPacked;
+            try writer.writeAll(input[offset..][0..8]);
+            offset += 8;
+            continue;
+        }
+
+        var word: [8]u8 = @splat(0);
+        var bits = tag;
+        while (bits != 0) {
+            const index: u3 = @intCast(@ctz(bits));
+            if (offset >= input.len) return PackedError.InvalidPacked;
+            word[index] = input[offset];
+            offset += 1;
+            bits &= bits - 1;
+        }
         try writer.writeAll(&word);
     }
 }
