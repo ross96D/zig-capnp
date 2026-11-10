@@ -11,6 +11,9 @@ const defaults = codegen.defaults;
 const bits_floats = codegen.bits_floats;
 const features = codegen.features;
 const groups = codegen.groups;
+const annotations = codegen.annotations;
+const interfaces = codegen.interfaces;
+const generics = codegen.generics;
 
 fn expectMessageBytes(actual: []const u8, fixture_path: []const u8) !void {
     const expected = try std.Io.Dir.cwd().readFileAlloc(
@@ -45,6 +48,9 @@ test "generated modules compile" {
     std.testing.refAllDecls(defaults);
     std.testing.refAllDecls(features);
     std.testing.refAllDecls(groups);
+    std.testing.refAllDecls(annotations);
+    std.testing.refAllDecls(interfaces);
+    std.testing.refAllDecls(generics);
 }
 
 test "generated primitive list round-trip" {
@@ -248,6 +254,45 @@ test "generated AnyPointer round-trip" {
         try std.testing.expectEqualStrings("first", try got.get(0).name());
         try std.testing.expectEqualStrings("second", try got.get(1).name());
     }
+}
+
+test "generated interface fields and pointer lists round-trip" {
+    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try builder.init();
+    defer builder.deinit();
+
+    var root = try builder.initRootStruct(interfaces.InterfaceHolder.Builder, interfaces.InterfaceHolder.builder_trait);
+    try root.calculator().setText("calculator");
+
+    var list = try root.calculators();
+    try list.init(2);
+    try list.get(0).setText("first");
+    try list.get(1).setText("second");
+
+    var message = builder.toReader();
+    const reader = try message.getRootStruct(interfaces.InterfaceHolder.Reader, interfaces.InterfaceHolder.reader_trait);
+    try std.testing.expectEqualStrings("calculator", try (try reader.calculator()).asText());
+
+    const got = try reader.calculators();
+    try std.testing.expectEqual(@as(u29, 2), got.length);
+    try std.testing.expectEqualStrings("first", try (try got.get(0)).asText());
+    try std.testing.expectEqualStrings("second", try (try got.get(1)).asText());
+}
+
+test "generated generic struct round-trip" {
+    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try builder.init();
+    defer builder.deinit();
+
+    var root = try builder.initRootStruct(generics.Holder.Builder, generics.Holder.builder_trait);
+    var box = try root.itemBox();
+    var item = try box.value();
+    item.setN(42);
+
+    var message = builder.toReader();
+    const reader = try message.getRootStruct(generics.Holder.Reader, generics.Holder.reader_trait);
+    const item_reader = try (try reader.itemBox()).value();
+    try std.testing.expectEqual(@as(i32, 42), item_reader.n());
 }
 
 test "generated groups round-trip" {

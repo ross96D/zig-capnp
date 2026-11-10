@@ -7,3 +7,6 @@ pub const bits_floats = @import("codegen-zig/generated_07_bits_and_floats.zig");
 pub const schema_examples = @import("codegen-zig/generated_08-schema-examples.zig");
 pub const features = @import("codegen-zig/generated_09_codegen_features.zig");
 pub const groups = @import("codegen-zig/generated_10_groups.zig");
+pub const annotations = @import("codegen-zig/generated_11_annotations.zig");
+pub const interfaces = @import("codegen-zig/generated_12_interfaces.zig");
+pub const generics = @import("codegen-zig/generated_13_generics.zig");

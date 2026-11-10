@@ -114,6 +114,10 @@ pub const Node = struct {
                 return .{ .builder = builder };
             }
 
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            }
+
             /// Size of the data section, in words.
             pub fn dataWordCount(self: @This()) u16 {
                 return self.builder.readIntField(u16, 7) ^ 0;
@@ -245,6 +249,10 @@ pub const Node = struct {
                 return .{ .builder = builder };
             }
 
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            }
+
             /// Enumerants ordered by numeric value (ordinal).
             pub fn enumerants(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Enumerant.Builder, _Root.Enumerant.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Enumerant.Builder, _Root.Enumerant.builder_trait), 3);
@@ -296,6 +304,10 @@ pub const Node = struct {
 
             pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                 return .{ .builder = builder };
+            }
+
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
             }
 
             /// Methods ordered by ordinal.
@@ -352,6 +364,10 @@ pub const Node = struct {
 
             pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                 return .{ .builder = builder };
+            }
+
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
             }
 
             pub fn @"type"(self: @This()) capnp.BuildError!_Root.Type.Builder {
@@ -450,6 +466,10 @@ pub const Node = struct {
 
             pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                 return .{ .builder = builder };
+            }
+
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
             }
 
             pub fn @"type"(self: @This()) capnp.BuildError!_Root.Type.Builder {
@@ -595,6 +615,10 @@ pub const Node = struct {
                 return .{ .builder = builder };
             }
 
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            }
+
             pub fn name(self: @This()) capnp.BuildError![:0]const u8 {
                 return try self.builder.readStringField(0);
             }
@@ -652,6 +676,10 @@ pub const Node = struct {
 
             pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                 return .{ .builder = builder };
+            }
+
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
             }
 
             /// Unqualified symbol name.  Unlike Node.displayName, this *can* be used programmatically.
@@ -725,6 +753,10 @@ pub const Node = struct {
                     return .{ .builder = builder };
                 }
 
+                pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+                }
+
                 /// Doc comment on the member.
                 pub fn docComment(self: @This()) capnp.BuildError![:0]const u8 {
                     return try self.builder.readStringField(0);
@@ -794,6 +826,10 @@ pub const Node = struct {
 
             pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                 return .{ .builder = builder };
+            }
+
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
             }
 
             /// ID of the Node which this info describes.
@@ -974,6 +1010,10 @@ pub const Node = struct {
 
         pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
             return .{ .builder = builder };
+        }
+
+        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
         }
 
         pub fn which(self: @This()) _Root.Node.Tag {
@@ -1210,6 +1250,10 @@ pub const Field = struct {
                 return .{ .builder = builder };
             }
 
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            }
+
             /// Offset, in units of the field's size, from the beginning of the section in which the field
             /// resides.  E.g. for a UInt32 field, multiply this by 4 to get the byte offset from the
             /// beginning of the data section.
@@ -1283,6 +1327,10 @@ pub const Field = struct {
 
             pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                 return .{ .builder = builder };
+            }
+
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
             }
 
             /// The ID of the group's node.
@@ -1362,6 +1410,10 @@ pub const Field = struct {
 
             pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                 return .{ .builder = builder };
+            }
+
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
             }
 
             pub fn which(self: @This()) _Root.Field.ordinal.Tag {
@@ -1478,6 +1530,10 @@ pub const Field = struct {
 
         pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
             return .{ .builder = builder };
+        }
+
+        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
         }
 
         pub fn which(self: @This()) _Root.Field.Tag {
@@ -1603,6 +1659,10 @@ pub const Enumerant = struct {
             return .{ .builder = builder };
         }
 
+        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        }
+
         pub fn name(self: @This()) capnp.BuildError![:0]const u8 {
             return try self.builder.readStringField(0);
         }
@@ -1669,6 +1729,10 @@ pub const Superclass = struct {
 
         pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
             return .{ .builder = builder };
+        }
+
+        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
         }
 
         pub fn id(self: @This()) u64 {
@@ -1766,6 +1830,10 @@ pub const Method = struct {
 
         pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
             return .{ .builder = builder };
+        }
+
+        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
         }
 
         pub fn name(self: @This()) capnp.BuildError![:0]const u8 {
@@ -1899,6 +1967,10 @@ pub const Type = struct {
                 return .{ .builder = builder };
             }
 
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            }
+
             pub fn elementType(self: @This()) capnp.BuildError!_Root.Type.Builder {
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 0);
             }
@@ -1947,6 +2019,10 @@ pub const Type = struct {
 
             pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                 return .{ .builder = builder };
+            }
+
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
             }
 
             pub fn typeId(self: @This()) u64 {
@@ -2007,6 +2083,10 @@ pub const Type = struct {
                 return .{ .builder = builder };
             }
 
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            }
+
             pub fn typeId(self: @This()) u64 {
                 return self.builder.readIntField(u64, 1) ^ 0;
             }
@@ -2063,6 +2143,10 @@ pub const Type = struct {
 
             pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                 return .{ .builder = builder };
+            }
+
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
             }
 
             pub fn typeId(self: @This()) u64 {
@@ -2186,6 +2270,10 @@ pub const Type = struct {
                     return .{ .builder = builder };
                 }
 
+                pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+                }
+
                 pub fn which(self: @This()) _Root.Type.anyPointer.unconstrained.Tag {
                     return @fromBackingInt(@intCast(self.builder.readIntField(u16, 5)));
                 }
@@ -2292,6 +2380,10 @@ pub const Type = struct {
                     return .{ .builder = builder };
                 }
 
+                pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+                }
+
                 /// ID of the generic type whose parameter we're referencing. This is always either the
                 /// current scope's type ID or one of its ancestors' IDs.
                 pub fn scopeId(self: @This()) u64 {
@@ -2353,6 +2445,10 @@ pub const Type = struct {
 
                 pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                     return .{ .builder = builder };
+                }
+
+                pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
                 }
 
                 pub fn parameterIndex(self: @This()) u16 {
@@ -2429,6 +2525,10 @@ pub const Type = struct {
 
             pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                 return .{ .builder = builder };
+            }
+
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
             }
 
             pub fn which(self: @This()) _Root.Type.anyPointer.Tag {
@@ -2649,6 +2749,10 @@ pub const Type = struct {
 
         pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
             return .{ .builder = builder };
+        }
+
+        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
         }
 
         pub fn which(self: @This()) _Root.Type.Tag {
@@ -2987,6 +3091,10 @@ pub const Brand = struct {
                 return .{ .builder = builder };
             }
 
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            }
+
             pub fn which(self: @This()) _Root.Brand.Scope.Tag {
                 return @fromBackingInt(@intCast(self.builder.readIntField(u16, 4)));
             }
@@ -3097,6 +3205,10 @@ pub const Brand = struct {
                 return .{ .builder = builder };
             }
 
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            }
+
             pub fn which(self: @This()) _Root.Brand.Binding.Tag {
                 return @fromBackingInt(@intCast(self.builder.readIntField(u16, 0)));
             }
@@ -3160,6 +3272,10 @@ pub const Brand = struct {
 
         pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
             return .{ .builder = builder };
+        }
+
+        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
         }
 
         /// For each of the target type and each of its parent scopes, a parameterization may be included
@@ -3370,6 +3486,10 @@ pub const Value = struct {
 
         pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
             return .{ .builder = builder };
+        }
+
+        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
         }
 
         pub fn which(self: @This()) _Root.Value.Tag {
@@ -3647,6 +3767,10 @@ pub const Annotation = struct {
             return .{ .builder = builder };
         }
 
+        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        }
+
         /// ID of the annotation node.
         pub fn id(self: @This()) u64 {
             return self.builder.readIntField(u64, 0) ^ 0;
@@ -3731,6 +3855,10 @@ pub const CapnpVersion = struct {
             return .{ .builder = builder };
         }
 
+        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        }
+
         pub fn major(self: @This()) u16 {
             return self.builder.readIntField(u16, 0) ^ 0;
         }
@@ -3812,6 +3940,10 @@ pub const CodeGeneratorRequest = struct {
 
                 pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                     return .{ .builder = builder };
+                }
+
+                pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
                 }
 
                 /// ID of the imported file.
@@ -3898,6 +4030,10 @@ pub const CodeGeneratorRequest = struct {
                             return .{ .builder = builder };
                         }
 
+                        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+                        }
+
                         pub fn parentTypeId(self: @This()) u64 {
                             return self.builder.readIntField(u64, 1) ^ 0;
                         }
@@ -3975,6 +4111,10 @@ pub const CodeGeneratorRequest = struct {
 
                     pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                         return .{ .builder = builder };
+                    }
+
+                    pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                        return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
                     }
 
                     pub fn which(self: @This()) _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Tag {
@@ -4062,6 +4202,10 @@ pub const CodeGeneratorRequest = struct {
                     return .{ .builder = builder };
                 }
 
+                pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+                }
+
                 pub fn identifiers(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.builder_trait) {
                     return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.builder_trait), 0);
                 }
@@ -4119,6 +4263,10 @@ pub const CodeGeneratorRequest = struct {
 
             pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
                 return .{ .builder = builder };
+            }
+
+            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
             }
 
             /// ID of the file.
@@ -4209,6 +4357,10 @@ pub const CodeGeneratorRequest = struct {
 
         pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
             return .{ .builder = builder };
+        }
+
+        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
         }
 
         /// All nodes parsed by the compiler, including for the files on the command line and their

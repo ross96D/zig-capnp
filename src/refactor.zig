@@ -368,7 +368,14 @@ pub fn Refactor(comptime W: type) type {
                 switch (field.which()) {
                     .slot => {
                         const typ = try field.slot().?.type();
-                        const with_error = !(gt == .builder and typ.which() == .anyPointer);
+                        const with_error = if (gt == .builder)
+                            switch (typ.which()) {
+                                .anyPointer => isParameterType(typ),
+                                .interface => false,
+                                else => true,
+                            }
+                        else
+                            true;
                         try ctx.writer.writeAll("pub fn ");
                         try writeReplaceKeyword(name, ctx.writer);
                         try ctx.writer.writeAll("(self: @This()) ");
@@ -418,14 +425,108 @@ pub fn Refactor(comptime W: type) type {
             return name[0..1] ++ name[n..];
         }
 
+        fn typeParameterName(ctx: *WriteContext, typ: schema.Type.Reader) E!?[]u8 {
+            if (typ.which() != .anyPointer) return null;
+            const parameter = typ.anyPointer().?.parameter() orelse return null;
+
+            const scope = try ctx.getNodeById(parameter.scopeId());
+            const parameters = try scope.parameters();
+            const index = parameter.parameterIndex();
+            if (index >= parameters.length) return null;
+
+            return @as(?[]u8, try sanitizeName(ctx.allocator, try parameters.get(index).name()));
+        }
+
+        fn isParameterType(typ: schema.Type.Reader) bool {
+            if (typ.which() != .anyPointer) return false;
+            return typ.anyPointer().?.parameter() != null;
+        }
+
+        fn nodeIsGeneric(ctx: *WriteContext, id: u64) E!bool {
+            const node = try ctx.getNodeById(id);
+            const parameters = try node.parameters();
+            return parameters.length != 0;
+        }
+
+        fn writeTypeDescriptor(ctx: *WriteContext, typ: schema.Type.Reader) E!void {
+            switch (typ.which()) {
+                .text => try ctx.writer.writeAll("capnp.Text"),
+                .data => try ctx.writer.writeAll("capnp.Data"),
+                .anyPointer => {
+                    if (try typeParameterName(ctx, typ)) |name| {
+                        defer ctx.allocator.free(name);
+                        try ctx.writer.writeAll(name);
+                    } else {
+                        try ctx.writer.writeAll("capnp.AnyPointer");
+                    }
+                },
+                .interface => try ctx.writer.writeAll("capnp.Interface"),
+                .@"struct" => {
+                    try ctx.writer.writeAll("capnp.StructType(");
+                    try writeType(ctx, typ, .base, false, false);
+                    try ctx.writer.writeAll(", ");
+                    try writeType(ctx, typ, .base, false, false);
+                    try ctx.writer.writeAll(".builder_trait)");
+                },
+                else => try ctx.writer.writeAll("capnp.AnyPointer"),
+            }
+        }
+
+        fn writeBrandArgs(ctx: *WriteContext, id: u64, brand: schema.Brand.Reader) E!void {
+            const node = try ctx.getNodeById(id);
+            const parameters = try node.parameters();
+            if (parameters.length == 0) return;
+
+            try ctx.writer.writeByte('(');
+
+            var bindings: ?capnp.CompositeListReader(schema.Brand.Binding.Reader, schema.Brand.Binding.reader_trait) = null;
+            const scopes = try brand.scopes();
+            for (0..scopes.length) |i| {
+                const scope = scopes.get(@intCast(i));
+                if (scope.scopeId() != id) continue;
+                if (scope.which() != .bind) continue;
+                if (try scope.bind()) |bound| {
+                    bindings = bound;
+                    break;
+                }
+            }
+
+            for (0..parameters.length) |i| {
+                if (i != 0) try ctx.writer.writeAll(", ");
+
+                var wrote = false;
+                if (bindings) |bound| {
+                    if (i < bound.length) {
+                        const binding = bound.get(@intCast(i));
+                        if (binding.which() == .type) {
+                            if (try binding.type()) |argument| {
+                                try writeTypeDescriptor(ctx, argument);
+                                wrote = true;
+                            }
+                        }
+                    }
+                }
+                if (!wrote) try ctx.writer.writeAll("capnp.AnyPointer");
+            }
+
+            try ctx.writer.writeByte(')');
+        }
+
         fn writeListType(ctx: *WriteContext, element: schema.Type.Reader, gt: type_context) E!void {
+            if (element.which() == .interface or element.which() == .anyPointer) {
+                try ctx.writer.writeAll(switch (gt) {
+                    .builder_getter => "capnp.AnyPointerListBuilder",
+                    else => "capnp.AnyPointerListReader",
+                });
+                return;
+            }
+
             if (element.which() == .@"struct") {
-                const id = element.@"struct"().?.typeId();
                 const builder = gt == .builder_getter;
                 try ctx.writer.writeAll(if (builder) "capnp.CompositeListBuilder(" else "capnp.CompositeListReader(");
-                try ctx.writeNodeNameById(id);
+                try writeType(ctx, element, .base, false, false);
                 try ctx.writer.writeAll(if (builder) ".Builder, " else ".Reader, ");
-                try ctx.writeNodeNameById(id);
+                try writeType(ctx, element, .base, false, false);
                 try ctx.writer.writeAll(if (builder) ".builder_trait)" else ".reader_trait)");
                 return;
             }
@@ -463,18 +564,47 @@ pub fn Refactor(comptime W: type) type {
                 .list => try writeListType(ctx, try reader.list().?.elementType(), gt),
                 .@"enum" => try ctx.writeNodeNameById(reader.@"enum"().?.typeId()),
                 .@"struct" => {
-                    try ctx.writeNodeNameById(reader.@"struct"().?.typeId());
+                    const struct_ = reader.@"struct"().?;
+                    const id = struct_.typeId();
+                    try ctx.writeNodeNameById(id);
+                    if (try nodeIsGeneric(ctx, id)) {
+                        try writeBrandArgs(ctx, id, try struct_.brand());
+                    }
                     try ctx.writer.writeAll(switch (gt) {
                         .base => "",
                         .reader_getter => ".Reader",
                         .builder_getter => ".Builder",
                     });
                 },
-                .interface => try ctx.writer.writeAll("capnp.AnyPointerReader"),
-                .anyPointer => try ctx.writer.writeAll(switch (gt) {
-                    .builder_getter => "capnp.AnyPointerBuilder",
-                    else => "capnp.AnyPointerReader",
-                }),
+                .interface => {
+                    const interface = reader.interface().?;
+                    const id = interface.typeId();
+                    try ctx.writeNodeNameById(id);
+                    if (try nodeIsGeneric(ctx, id)) {
+                        try writeBrandArgs(ctx, id, try interface.brand());
+                    }
+                    try ctx.writer.writeAll(switch (gt) {
+                        .base => "",
+                        .reader_getter => ".Reader",
+                        .builder_getter => ".Builder",
+                    });
+                },
+                .anyPointer => {
+                    if (try typeParameterName(ctx, reader)) |name| {
+                        defer ctx.allocator.free(name);
+                        try ctx.writer.writeAll(name);
+                        try ctx.writer.writeAll(switch (gt) {
+                            .base => "",
+                            .reader_getter => ".Reader",
+                            .builder_getter => ".Builder",
+                        });
+                    } else {
+                        try ctx.writer.writeAll(switch (gt) {
+                            .builder_getter => "capnp.AnyPointerBuilder",
+                            else => "capnp.AnyPointerReader",
+                        });
+                    }
+                },
                 else => try ctx.writer.writeAll("capnp.AnyPointerReader"),
             }
         }
@@ -500,6 +630,36 @@ pub fn Refactor(comptime W: type) type {
             const prefix: usize = @intCast(node.displayNamePrefixLength());
             const name = if (prefix <= display.len) display[prefix..] else display;
             return sanitizeName(ctx.allocator, name);
+        }
+
+        fn methodTypeName(ctx: *WriteContext, method_name: []const u8, suffix: []const u8) E![]u8 {
+            const base = try sanitizeName(ctx.allocator, method_name);
+            defer ctx.allocator.free(base);
+
+            if (base.len == 0) {
+                return std.fmt.allocPrint(ctx.allocator, "Method{s}", .{suffix});
+            }
+
+            const out = try ctx.allocator.alloc(u8, base.len + suffix.len);
+            out[0] = std.ascii.toUpper(base[0]);
+            @memcpy(out[1..base.len], base[1..]);
+            @memcpy(out[base.len..], suffix);
+            return out;
+        }
+
+        fn writeNodeTypeName(ctx: *WriteContext, node: schema.Node.Reader) E!void {
+            try ctx.writeNodeName(node);
+            const parameters = try node.parameters();
+            if (parameters.length == 0) return;
+
+            try ctx.writer.writeByte('(');
+            for (0..parameters.length) |i| {
+                if (i != 0) try ctx.writer.writeAll(", ");
+                const parameter_name = try sanitizeName(ctx.allocator, try parameters.get(@intCast(i)).name());
+                defer ctx.allocator.free(parameter_name);
+                try writeReplaceKeyword(parameter_name, ctx.writer);
+            }
+            try ctx.writer.writeByte(')');
         }
 
         fn writeAnnotationEntry(ctx: *WriteContext, annotation: schema.Annotation.Reader) E!void {
@@ -746,7 +906,83 @@ pub fn Refactor(comptime W: type) type {
                 },
 
                 .interface => {
-                    // not yet implemented
+                    _ = try ctx.writeDocComment("///", try ctx.nodeDoc(node));
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub const ");
+                    try writeReplaceKeyword(name, ctx.writer);
+                    try ctx.writer.writeAll(" = struct {\n");
+                    ctx.indenter.inc();
+
+                    try ctx.writeIndent();
+                    try ctx.writer.print("pub const id: u64 = 0x{x};\n\n", .{node.id()});
+
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub const Reader = capnp.AnyPointerReader;\n");
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub const Builder = capnp.AnyPointerBuilder;\n\n");
+
+                    const interface = node.interface().?;
+                    const methods = try interface.methods();
+
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub const Method = enum(u16) {\n");
+                    ctx.indenter.inc();
+                    for (0..methods.length) |i| {
+                        const method = methods.get(@intCast(i));
+                        _ = try ctx.writeDocComment("///", try ctx.memberDoc(node, i));
+                        try ctx.writeIndent();
+                        try writeReplaceKeyword(try method.name(), ctx.writer);
+                        try ctx.writer.print(" = {d},\n", .{i});
+                    }
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("_,\n");
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("};\n\n");
+
+                    const superclasses = try interface.superclasses();
+                    if (superclasses.length != 0) {
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("pub const superclasses = [_]u64{\n");
+                        ctx.indenter.inc();
+                        for (0..superclasses.length) |i| {
+                            try ctx.writeIndent();
+                            try ctx.writer.print("0x{x},\n", .{superclasses.get(@intCast(i)).id()});
+                        }
+                        ctx.indenter.dec();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("};\n\n");
+                    }
+
+                    for (0..methods.length) |i| {
+                        const method = methods.get(@intCast(i));
+
+                        const params_id = method.paramStructType();
+                        if (params_id != 0) {
+                            const params = try ctx.getNodeById(params_id);
+                            if (params.scopeId() == 0) {
+                                const type_name = try methodTypeName(ctx, try method.name(), "Params");
+                                defer ctx.allocator.free(type_name);
+                                try writeNode(ctx, type_name, params);
+                            }
+                        }
+
+                        const results_id = method.resultStructType();
+                        if (results_id != 0) {
+                            const results = try ctx.getNodeById(results_id);
+                            if (results.scopeId() == 0) {
+                                const type_name = try methodTypeName(ctx, try method.name(), "Results");
+                                defer ctx.allocator.free(type_name);
+                                try writeNode(ctx, type_name, results);
+                            }
+                        }
+                    }
+
+                    try writeAnnotations(ctx, try node.annotations(), "annotations");
+
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("};\n");
                 },
 
                 .@"const" => {
@@ -805,12 +1041,35 @@ pub fn Refactor(comptime W: type) type {
                 .annotation => {},
 
                 .@"struct" => {
+                    const parameters = try node.parameters();
+                    const is_generic = parameters.length != 0;
+
                     _ = try ctx.writeDocComment("///", try ctx.nodeDoc(node));
-                    try ctx.writeIndent();
-                    try ctx.writer.writeAll("pub const ");
-                    try writeReplaceKeyword(name, ctx.writer);
-                    try ctx.writer.writeAll(" = struct {\n");
-                    ctx.indenter.inc();
+                    if (is_generic) {
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("pub fn ");
+                        try writeReplaceKeyword(name, ctx.writer);
+                        try ctx.writer.writeByte('(');
+                        for (0..parameters.length) |i| {
+                            if (i != 0) try ctx.writer.writeAll(", ");
+                            const parameter_name = try sanitizeName(ctx.allocator, try parameters.get(@intCast(i)).name());
+                            defer ctx.allocator.free(parameter_name);
+                            try ctx.writer.writeAll("comptime ");
+                            try writeReplaceKeyword(parameter_name, ctx.writer);
+                            try ctx.writer.writeAll(": type");
+                        }
+                        try ctx.writer.writeAll(") type {\n");
+                        ctx.indenter.inc();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("return struct {\n");
+                        ctx.indenter.inc();
+                    } else {
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("pub const ");
+                        try writeReplaceKeyword(name, ctx.writer);
+                        try ctx.writer.writeAll(" = struct {\n");
+                        ctx.indenter.inc();
+                    }
                     try ctx.writeIndent();
                     try ctx.writer.print("pub const id: u64 = 0x{x};\n\n", .{node.id()});
 
@@ -891,7 +1150,7 @@ pub fn Refactor(comptime W: type) type {
                     if (struct_.discriminantCount() > 0) {
                         try ctx.writeIndent();
                         try ctx.writer.writeAll("pub fn which(self: @This()) ");
-                        try ctx.writeNodeName(node);
+                        try writeNodeTypeName(ctx, node);
                         try ctx.writer.writeAll(".Tag {\n");
                         ctx.indenter.inc();
 
@@ -943,10 +1202,19 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("}\n\n");
 
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub fn fromBuildContext(context: capnp.BuildContext) @This() {\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };\n");
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("}\n\n");
+
                     if (struct_.discriminantCount() > 0) {
                         try ctx.writeIndent();
                         try ctx.writer.writeAll("pub fn which(self: @This()) ");
-                        try ctx.writeNodeName(node);
+                        try writeNodeTypeName(ctx, node);
                         try ctx.writer.writeAll(".Tag {\n");
                         ctx.indenter.inc();
                         try ctx.writeIndent();
@@ -986,9 +1254,18 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("};\n\n");
 
-                    ctx.indenter.dec();
-                    try ctx.writeIndent();
-                    try ctx.writer.writeAll("};\n\n");
+                    if (is_generic) {
+                        ctx.indenter.dec();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("};\n");
+                        ctx.indenter.dec();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("}\n\n");
+                    } else {
+                        ctx.indenter.dec();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("};\n\n");
+                    }
                 },
                 _ => {
                     @panic("Unknown node type");
@@ -1224,30 +1501,47 @@ pub fn Refactor(comptime W: type) type {
                             try ctx.writer.print(", {d});\n", .{slot.offset()});
                         },
                         .@"struct" => {
-                            const id = t.@"struct"().?.typeId();
                             if (gt == .builder) {
                                 try ctx.writer.writeAll("return try self.builder.buildStructField(");
-                                try ctx.writeNodeNameById(id);
-                                try ctx.writer.writeAll(".Builder, ");
-                                try ctx.writeNodeNameById(id);
+                                try writeType(ctx, t, .builder_getter, false, false);
+                                try ctx.writer.writeAll(", ");
+                                try writeType(ctx, t, .base, false, false);
                                 try ctx.writer.writeAll(".builder_trait, ");
                                 try ctx.writer.print("{d});\n", .{slot.offset()});
                             } else {
                                 try ctx.writer.writeAll("return try self.reader.readPtrField(");
-                                try ctx.writeNodeNameById(id);
-                                try ctx.writer.writeAll(".Reader, ");
-                                try ctx.writer.print("{d});\n", .{slot.offset()});
+                                try writeType(ctx, t, .reader_getter, false, false);
+                                try ctx.writer.print(", {d});\n", .{slot.offset()});
                             }
                         },
                         .anyPointer => {
-                            if (gt == .builder) {
-                                try ctx.writer.print("return self.builder.buildPtrField(capnp.AnyPointerBuilder, {d});\n", .{slot.offset()});
+                            if (try typeParameterName(ctx, t)) |name| {
+                                defer ctx.allocator.free(name);
+                                if (gt == .builder) {
+                                    try ctx.writer.print("return try {s}.buildField(self.builder, {d});\n", .{ name, slot.offset() });
+                                } else {
+                                    try ctx.writer.print("return try {s}.readField(self.reader, {d});\n", .{ name, slot.offset() });
+                                }
+                            } else if (gt == .builder) {
+                                try ctx.writer.writeAll("return self.builder.buildPtrField(");
+                                try writeType(ctx, t, .builder_getter, false, false);
+                                try ctx.writer.print(", {d});\n", .{slot.offset()});
                             } else {
-                                try ctx.writer.print("return try self.reader.readPtrField(capnp.AnyPointerReader, {d});\n", .{slot.offset()});
+                                try ctx.writer.writeAll("return try self.reader.readPtrField(");
+                                try writeType(ctx, t, .reader_getter, false, false);
+                                try ctx.writer.print(", {d});\n", .{slot.offset()});
                             }
                         },
                         .interface => {
-                            try ctx.writer.print("return try self.{s}.readPtrField(capnp.AnyPointerReader, {d});\n", .{ target, slot.offset() });
+                            if (gt == .builder) {
+                                try ctx.writer.writeAll("return self.builder.buildPtrField(");
+                                try writeType(ctx, t, .builder_getter, false, false);
+                                try ctx.writer.print(", {d});\n", .{slot.offset()});
+                            } else {
+                                try ctx.writer.writeAll("return try self.reader.readPtrField(");
+                                try writeType(ctx, t, .reader_getter, false, false);
+                                try ctx.writer.print(", {d});\n", .{slot.offset()});
+                            }
                         },
                         .@"enum" => {
                             const default_value = (try slot.defaultValue()).@"enum"() orelse 0;

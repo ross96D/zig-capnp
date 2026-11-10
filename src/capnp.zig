@@ -428,6 +428,126 @@ pub const AnyPointerBuilder = struct {
     }
 };
 
+pub const AnyPointerListReader = struct {
+    context: ReadContext,
+    length: u29,
+
+    pub fn fromReadContext(context: ReadContext) Error!AnyPointerListReader {
+        var _context = context;
+        switch (try _context.readPtr()) {
+            .null => return .{ .context = context, .length = 0 },
+            .list => |list| {
+                if (list.element_size != 6) return Error.TypeMismatch;
+                return .{ .context = _context, .length = list.elements_or_words };
+            },
+            else => return Error.TypeMismatch,
+        }
+    }
+
+    pub fn fromNull(context: ReadContext) AnyPointerListReader {
+        return .{ .context = context, .length = 0 };
+    }
+
+    pub fn get(self: AnyPointerListReader, index: u32) Error!AnyPointerReader {
+        std.debug.assert(index < self.length);
+        var context = self.context;
+        context.offset_words = @intCast(@as(u64, context.offset_words) + index);
+        return AnyPointerReader.fromReadContext(context);
+    }
+};
+
+pub const AnyPointerListBuilder = struct {
+    ptr: BuildContext,
+    context: ?BuildContext,
+    length: u29,
+
+    pub fn fromBuildContext(ptr: BuildContext) AnyPointerListBuilder {
+        std.debug.assert(ptr.readInt(u64, 0) == 0);
+        return .{ .ptr = ptr, .context = null, .length = 0 };
+    }
+
+    pub fn init(self: *AnyPointerListBuilder, length: u29) BuildError!void {
+        if (self.length != 0) return Error.AlreadyInitialized;
+
+        const object = try self.ptr.builder.allocObject(self.ptr, length);
+        self.context = object.content;
+        self.length = length;
+
+        try writeObjectPointer(&self.ptr, object, Ptr{ .list = .{
+            .offset_words = 0,
+            .elements_or_words = length,
+            .element_size = 6,
+        } });
+    }
+
+    pub fn get(self: AnyPointerListBuilder, index: u32) AnyPointerBuilder {
+        std.debug.assert(index < self.length);
+        var context = self.context.?;
+        context.offset_words = @intCast(@as(u64, context.offset_words) + index);
+        return AnyPointerBuilder.fromBuildContext(context);
+    }
+};
+
+/// Descriptor used when a generic parameter is bound to Text.
+pub const Text = struct {
+    pub const Reader = ListReader(u8);
+    pub const Builder = ListBuilder(u8);
+
+    pub fn readField(reader: StructReader, offset: u16) Error!Reader {
+        return reader.readPtrField(Reader, offset);
+    }
+
+    pub fn buildField(builder: StructBuilder, offset: u16) BuildError!Builder {
+        return builder.buildPtrField(Builder, offset);
+    }
+};
+
+/// Descriptor used when a generic parameter is bound to Data.
+pub const Data = struct {
+    pub const Reader = ListReader(u8);
+    pub const Builder = ListBuilder(u8);
+
+    pub fn readField(reader: StructReader, offset: u16) Error!Reader {
+        return reader.readPtrField(Reader, offset);
+    }
+
+    pub fn buildField(builder: StructBuilder, offset: u16) BuildError!Builder {
+        return builder.buildPtrField(Builder, offset);
+    }
+};
+
+/// Descriptor used when a generic parameter is bound to AnyPointer.
+pub const AnyPointer = struct {
+    pub const Reader = AnyPointerReader;
+    pub const Builder = AnyPointerBuilder;
+
+    pub fn readField(reader: StructReader, offset: u16) Error!Reader {
+        return reader.readPtrField(Reader, offset);
+    }
+
+    pub fn buildField(builder: StructBuilder, offset: u16) BuildError!Builder {
+        return builder.buildPtrField(Builder, offset);
+    }
+};
+
+/// Descriptor used when a generic parameter is bound to an interface.
+pub const Interface = AnyPointer;
+
+pub fn StructType(comptime T: type, comptime trait: BuilderTrait(T.Builder)) type {
+    return struct {
+        pub const Reader = T.Reader;
+        pub const Builder = T.Builder;
+
+        pub fn readField(reader: StructReader, offset: u16) Error!Reader {
+            return reader.readPtrField(Reader, offset);
+        }
+
+        pub fn buildField(builder: StructBuilder, offset: u16) BuildError!Builder {
+            return builder.buildStructField(Builder, trait, offset);
+        }
+    };
+}
+
 pub const StructReader = struct {
     context: ReadContext,
     data_words: u16,
@@ -532,6 +652,24 @@ pub const StructBuilder = struct {
         var ptr = self.context;
         ptr.relativeWords(self.data_words + ptr_no);
         return trait.builder(try ptr.allocStruct(trait.data_words, trait.ptr_words));
+    }
+
+    pub fn fromBuildContext(context: BuildContext) StructBuilder {
+        const ptr = Ptr.of_u64(context.readInt(u64, 0));
+        switch (ptr) {
+            .null => return .{ .context = context, .data_words = 0, .ptr_words = 0 },
+            .struct_ => |struct_| {
+                var _context = context;
+                _context.offset_words = @intCast(@as(u64, _context.offset_words) +
+                    1 + @as(u64, @intCast(struct_.offset_words)));
+                return .{
+                    .context = _context,
+                    .data_words = struct_.data_words,
+                    .ptr_words = struct_.ptr_words,
+                };
+            },
+            else => return .{ .context = context, .data_words = 0, .ptr_words = 0 },
+        }
     }
 
     pub fn readPtrField(self: StructBuilder, comptime T: type, ptr_no: u16) Error!T {
@@ -994,6 +1132,31 @@ pub const Message = struct {
         return Message{ .segments = segments };
     }
 
+    pub fn fromPackedBytes(input: []const u8, allocator: std.mem.Allocator) !Message {
+        const size = try packing.messageSize(input);
+        const unpacked = try allocator.alloc(u8, size);
+        defer allocator.free(unpacked);
+
+        var writer = std.Io.Writer.fixed(unpacked);
+        try packing.unpack(&writer, input);
+        if (writer.end != size) return Error.OutOfBounds;
+
+        return fromBytes(unpacked, allocator);
+    }
+
+    pub fn fromPackedFile(file: std.Io.File, io: std.Io, allocator: std.mem.Allocator) !Message {
+        const file_size = try file.length(io);
+        if (file_size > std.math.maxInt(usize)) return Error.MessageTooLarge;
+
+        const input = try allocator.alloc(u8, @intCast(file_size));
+        defer allocator.free(input);
+
+        const read = try file.readPositionalAll(io, input, 0);
+        if (read != input.len) return Error.OutOfBounds;
+
+        return fromPackedBytes(input, allocator);
+    }
+
     pub fn fromBytes(bytes: []const u8, allocator: std.mem.Allocator) !Message {
         if (bytes.len < 4) return Error.OutOfBounds;
 
@@ -1288,6 +1451,19 @@ pub const MessageBuilder = struct {
         var output = std.Io.Writer.Allocating.init(allocator);
         errdefer output.deinit();
         try self.writeTo(&output.writer);
+        return output.toOwnedSlice();
+    }
+
+    pub fn writePackedTo(self: MessageBuilder, writer: *std.Io.Writer, allocator: std.mem.Allocator) !void {
+        const bytes = try self.toBytes(allocator);
+        defer allocator.free(bytes);
+        try packing.pack(writer, bytes);
+    }
+
+    pub fn toPackedBytes(self: MessageBuilder, allocator: std.mem.Allocator) ![]u8 {
+        var output = std.Io.Writer.Allocating.init(allocator);
+        errdefer output.deinit();
+        try self.writePackedTo(&output.writer, allocator);
         return output.toOwnedSlice();
     }
 

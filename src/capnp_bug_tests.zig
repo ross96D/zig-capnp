@@ -973,6 +973,24 @@ test "BUG: composite list with a non-struct tag must be an error" {
     try expectAnyError(s.readPtrField(capnp.CompositeListReader(Dummy.Reader, Dummy.reader_trait), 0));
 }
 
+test "packed message round-trip through public API" {
+    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
+    try builder.init();
+    defer builder.deinit();
+
+    var root = try builder.initRootStruct(OneWord.Builder, OneWord.builder_trait);
+    root.setValue(0x0123_4567_89ab_cdef);
+
+    const bytes = try builder.toPackedBytes(testing.allocator);
+    defer testing.allocator.free(bytes);
+
+    var message = try capnp.Message.fromPackedBytes(bytes, testing.allocator);
+    defer message.deinit(testing.allocator);
+
+    const reader = try message.getRootStruct(OneWord.Reader, OneWord.reader_trait);
+    try testing.expectEqual(@as(u64, 0x0123_4567_89ab_cdef), reader.getValue());
+}
+
 test "BUG: ListBuilder.init can be called twice without an error" {
     var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
     try builder.init();
