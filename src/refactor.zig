@@ -1589,7 +1589,14 @@ pub fn Refactor(comptime W: type) type {
                     switch (t.which()) {
                         .void => {
                             try ctx.openVoidSetter(try field.name());
-                            try writeDiscriminant(ctx, discriminant_offset, field);
+                            if (field.discriminantValue() == 0xffff) {
+                                // Non-union void fields have no discriminant to
+                                // write, so self would otherwise be unused.
+                                try ctx.writeIndent();
+                                try ctx.writer.writeAll("_ = self;\n");
+                            } else {
+                                try writeDiscriminant(ctx, discriminant_offset, field);
+                            }
                             try ctx.writeIndent();
                             try ctx.writer.writeAll("return;\n");
                             try ctx.closeSetter();

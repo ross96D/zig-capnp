@@ -14,6 +14,7 @@ const groups = codegen.groups;
 const annotations = codegen.annotations;
 const interfaces = codegen.interfaces;
 const generics = codegen.generics;
+const void_setters = codegen.void_setters;
 
 fn expectMessageBytes(actual: []const u8, fixture_path: []const u8) !void {
     const expected = try std.Io.Dir.cwd().readFileAlloc(
@@ -51,6 +52,7 @@ test "generated modules compile" {
     std.testing.refAllDecls(annotations);
     std.testing.refAllDecls(interfaces);
     std.testing.refAllDecls(generics);
+    std.testing.refAllDecls(void_setters);
 }
 
 test "generated primitive list round-trip" {
@@ -326,4 +328,26 @@ test "generated groups round-trip" {
     const union_reader = try union_message.getRootStruct(groups.WithUnionGroup.Reader, groups.WithUnionGroup.reader_trait);
     try std.testing.expectEqual(groups.WithUnionGroup.Tag.b, union_reader.which());
     try std.testing.expectEqual(@as(?i32, 7), union_reader.b());
+}
+
+test "generated non-union void setters compile and work" {
+    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try builder.init();
+    defer builder.deinit();
+
+    var root = try builder.initRootStruct(void_setters.VoidFields.Builder, void_setters.VoidFields.builder_trait);
+
+    // A non-union Void field has no discriminant to write, which previously
+    // left the generated setter's `self` parameter unused and failed to compile.
+    root.setNothing();
+    root.setFlag(true);
+    try std.testing.expect(root.flag());
+
+    root.setValue(7);
+    try std.testing.expectEqual(void_setters.VoidFields.Tag.value, root.which());
+    try std.testing.expectEqual(@as(?i32, 7), root.value());
+
+    root.setChoice();
+    try std.testing.expectEqual(void_setters.VoidFields.Tag.choice, root.which());
+    try std.testing.expect(root.choice() != null);
 }

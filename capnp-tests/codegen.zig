@@ -10,3 +10,4 @@ pub const groups = @import("codegen-zig/generated_10_groups.zig");
 pub const annotations = @import("codegen-zig/generated_11_annotations.zig");
 pub const interfaces = @import("codegen-zig/generated_12_interfaces.zig");
 pub const generics = @import("codegen-zig/generated_13_generics.zig");
+pub const void_setters = @import("codegen-zig/generated_14_void_setters.zig");
