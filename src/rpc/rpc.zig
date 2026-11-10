@@ -93,9 +93,6 @@
 const _Root = @This();
 const capnp = @import("capnp");
 
-pub const annotations = struct {
-    // unsupported annotation namespace: interface values are not implemented
-};
 /// An RPC connection is a bi-directional stream of Messages.
 pub const Message = struct {
     pub const id: u64 = 0x91b79f1f808db032;

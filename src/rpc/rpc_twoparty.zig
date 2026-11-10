@@ -53,9 +53,6 @@
 const _Root = @This();
 const capnp = @import("capnp");
 
-pub const annotations = struct {
-    // unsupported annotation namespace: interface values are not implemented
-};
 pub const Side = enum(u16) {
     /// The object lives on the "server" or "supervisor" end of the connection. Only the
     /// server/supervisor knows how to interpret the ref; to the client, it is opaque.

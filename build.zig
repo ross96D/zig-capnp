@@ -22,6 +22,15 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/capnp.zig"),
     });
 
+    const capnp_rpc_mod = b.addModule("capnp_rpc", .{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/rpc/connection.zig"),
+        .imports = &.{
+            .{ .name = "capnp", .module = capnp_mod },
+        },
+    });
+
     const lib = b.addLibrary(.{
         .linkage = .static,
         .name = "zig-capnp",
@@ -59,6 +68,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("capnp-tests/codegen.zig"),
         .imports = &.{
             .{ .name = "capnp", .module = capnp_mod },
+            .{ .name = "capnp_rpc", .module = capnp_rpc_mod },
         },
     });
 
@@ -68,6 +78,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/codegen_tests.zig"),
         .imports = &.{
             .{ .name = "capnp", .module = capnp_mod },
+            .{ .name = "capnp_rpc", .module = capnp_rpc_mod },
             .{ .name = "capnpc", .module = compiler_mod },
             .{ .name = "codegen", .module = codegen_mod },
         },

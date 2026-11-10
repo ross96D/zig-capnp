@@ -1,5 +1,6 @@
 const std = @import("std");
 const capnp = @import("capnp");
+const capnp_rpc = @import("capnp_rpc");
 const capnpc = @import("capnpc");
 const codegen = @import("codegen");
 
@@ -295,6 +296,65 @@ test "generated generic struct round-trip" {
     const reader = try message.getRootStruct(generics.Holder.Reader, generics.Holder.reader_trait);
     const item_reader = try (try reader.itemBox()).value();
     try std.testing.expectEqual(@as(i32, 42), item_reader.n());
+}
+
+const TypedCalculator = struct {
+    fn add(
+        _: *anyopaque,
+        params: interfaces.Calculator.AddParams.Reader,
+        results: interfaces.Calculator.AddResults.Builder,
+        _: capnp_rpc.Call,
+    ) anyerror!void {
+        results.setSum(params.a() + params.b());
+    }
+
+    fn reset(
+        _: *anyopaque,
+        _: interfaces.Calculator.ResetParams.Reader,
+        _: interfaces.Calculator.ResetResults.Builder,
+        _: capnp_rpc.Call,
+    ) anyerror!void {}
+};
+
+test "generated typed interface client and server" {
+    var loopback = capnp_rpc.Loopback.init(std.testing.allocator);
+    defer loopback.deinit();
+
+    var server_connection = try capnp_rpc.Connection.init(std.testing.allocator, loopback.endpoint(.server));
+    defer server_connection.deinit();
+
+    var client_connection = try capnp_rpc.Connection.init(std.testing.allocator, loopback.endpoint(.client));
+    defer client_connection.deinit();
+
+    client_connection.peer = &server_connection;
+    server_connection.peer = &client_connection;
+
+    var server = interfaces.Calculator.Server{
+        .context = undefined,
+        .vtable = .{
+            .add = TypedCalculator.add,
+            .reset = TypedCalculator.reset,
+        },
+    };
+    server_connection.setBootstrap(.{ .local = server.localCapability() });
+
+    const capability = try client_connection.bootstrap();
+    const calculator = interfaces.Calculator.Client.fromCapability(capability);
+
+    var request = try calculator.add();
+    defer request.deinit();
+    var params = try request.params();
+    params.setA(2);
+    params.setB(40);
+
+    var response = try request.send();
+    defer response.deinit(std.testing.allocator);
+
+    const results = try response.results(
+        interfaces.Calculator.AddResults.Reader,
+        interfaces.Calculator.AddResults.reader_trait,
+    );
+    try std.testing.expectEqual(@as(i32, 42), results.sum());
 }
 
 test "generated groups round-trip" {

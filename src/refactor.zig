@@ -869,8 +869,6 @@ pub fn Refactor(comptime W: type) type {
                         try ctx.writer.writeAll("\n");
                     }
 
-                    try writeAnnotations(ctx, try node.annotations(), "annotations");
-
                     const nested_nodes = try node.nestedNodes();
                     for (0..nested_nodes.length) |i| {
                         const nested_node = nested_nodes.get(@intCast(i));
@@ -917,6 +915,9 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writer.print("pub const id: u64 = 0x{x};\n\n", .{node.id()});
 
                     try ctx.writeIndent();
+                    try ctx.writer.writeAll("const _capnp_rpc = @import(\"capnp_rpc\");\n\n");
+
+                    try ctx.writeIndent();
                     try ctx.writer.writeAll("pub const Reader = capnp.AnyPointerReader;\n");
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("pub const Builder = capnp.AnyPointerBuilder;\n\n");
@@ -960,23 +961,240 @@ pub fn Refactor(comptime W: type) type {
                         const params_id = method.paramStructType();
                         if (params_id != 0) {
                             const params = try ctx.getNodeById(params_id);
+                            const type_name = try methodTypeName(ctx, try method.name(), "Params");
+                            defer ctx.allocator.free(type_name);
                             if (params.scopeId() == 0) {
-                                const type_name = try methodTypeName(ctx, try method.name(), "Params");
-                                defer ctx.allocator.free(type_name);
                                 try writeNode(ctx, type_name, params);
+                            } else {
+                                try ctx.writeIndent();
+                                try ctx.writer.writeAll("pub const ");
+                                try writeReplaceKeyword(type_name, ctx.writer);
+                                try ctx.writer.writeAll(" = ");
+                                try ctx.writeNodeNameById(params_id);
+                                try ctx.writer.writeAll(";\n\n");
                             }
                         }
 
                         const results_id = method.resultStructType();
                         if (results_id != 0) {
                             const results = try ctx.getNodeById(results_id);
+                            const type_name = try methodTypeName(ctx, try method.name(), "Results");
+                            defer ctx.allocator.free(type_name);
                             if (results.scopeId() == 0) {
-                                const type_name = try methodTypeName(ctx, try method.name(), "Results");
-                                defer ctx.allocator.free(type_name);
                                 try writeNode(ctx, type_name, results);
+                            } else {
+                                try ctx.writeIndent();
+                                try ctx.writer.writeAll("pub const ");
+                                try writeReplaceKeyword(type_name, ctx.writer);
+                                try ctx.writer.writeAll(" = ");
+                                try ctx.writeNodeNameById(results_id);
+                                try ctx.writer.writeAll(";\n\n");
                             }
                         }
                     }
+
+                    for (0..methods.length) |i| {
+                        const method = methods.get(@intCast(i));
+                        const method_name = try method.name();
+                        const request_name = try methodTypeName(ctx, method_name, "Request");
+                        defer ctx.allocator.free(request_name);
+                        const params_name = try methodTypeName(ctx, method_name, "Params");
+                        defer ctx.allocator.free(params_name);
+
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("pub const ");
+                        try writeReplaceKeyword(request_name, ctx.writer);
+                        try ctx.writer.writeAll(" = struct {\n");
+                        ctx.indenter.inc();
+
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("request: _capnp_rpc.Request,\n\n");
+
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("pub fn params(self: *@This()) !");
+                        try writeReplaceKeyword(params_name, ctx.writer);
+                        try ctx.writer.writeAll(".Builder {\n");
+                        ctx.indenter.inc();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("return try self.request.initParams(");
+                        try writeReplaceKeyword(params_name, ctx.writer);
+                        try ctx.writer.writeAll(".Builder, ");
+                        try writeReplaceKeyword(params_name, ctx.writer);
+                        try ctx.writer.writeAll(".builder_trait);\n");
+                        ctx.indenter.dec();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("}\n\n");
+
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("pub fn addCapability(self: *@This(), capability: _capnp_rpc.Capability) !u32 {\n");
+                        ctx.indenter.inc();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("return self.request.addCapability(capability);\n");
+                        ctx.indenter.dec();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("}\n\n");
+
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("pub fn start(self: *@This()) !_capnp_rpc.Promise {\n");
+                        ctx.indenter.inc();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("return self.request.start();\n");
+                        ctx.indenter.dec();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("}\n\n");
+
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("pub fn send(self: *@This()) !_capnp_rpc.Response {\n");
+                        ctx.indenter.inc();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("return self.request.send();\n");
+                        ctx.indenter.dec();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("}\n\n");
+
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("pub fn deinit(self: *@This()) void {\n");
+                        ctx.indenter.inc();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("self.request.deinit();\n");
+                        ctx.indenter.dec();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("}\n");
+
+                        ctx.indenter.dec();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("};\n\n");
+                    }
+
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub const Client = struct {\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("capability: _capnp_rpc.Capability,\n\n");
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub fn fromCapability(capability: _capnp_rpc.Capability) @This() {\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("return .{ .capability = capability };\n");
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("}\n");
+
+                    for (0..methods.length) |i| {
+                        const method = methods.get(@intCast(i));
+                        const method_name = try method.name();
+                        const request_name = try methodTypeName(ctx, method_name, "Request");
+                        defer ctx.allocator.free(request_name);
+
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("pub fn ");
+                        try writeReplaceKeyword(method_name, ctx.writer);
+                        try ctx.writer.writeAll("(self: @This()) !");
+                        try writeReplaceKeyword(request_name, ctx.writer);
+                        try ctx.writer.writeAll(" {\n");
+                        ctx.indenter.inc();
+                        try ctx.writeIndent();
+                        try ctx.writer.print("return .{{ .request = try self.capability.beginCall(0x{x}, {d}) }};\n", .{ node.id(), i });
+                        ctx.indenter.dec();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("}\n");
+                    }
+
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("};\n\n");
+
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub const Server = struct {\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("context: *anyopaque,\n");
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("vtable: VTable,\n\n");
+
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub const VTable = struct {\n");
+                    ctx.indenter.inc();
+                    for (0..methods.length) |i| {
+                        const method = methods.get(@intCast(i));
+                        const method_name = try method.name();
+                        const params_name = try methodTypeName(ctx, method_name, "Params");
+                        defer ctx.allocator.free(params_name);
+                        const results_name = try methodTypeName(ctx, method_name, "Results");
+                        defer ctx.allocator.free(results_name);
+
+                        try ctx.writeIndent();
+                        try writeReplaceKeyword(method_name, ctx.writer);
+                        try ctx.writer.writeAll(": *const fn (context: *anyopaque, params: ");
+                        try writeReplaceKeyword(params_name, ctx.writer);
+                        try ctx.writer.writeAll(".Reader, results: ");
+                        try writeReplaceKeyword(results_name, ctx.writer);
+                        try ctx.writer.writeAll(".Builder, capnp_call: _capnp_rpc.Call) anyerror!void,\n");
+                    }
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("};\n\n");
+
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub fn localCapability(self: *@This()) _capnp_rpc.LocalCapability {\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.print("return .{{ .context = self, .interface_id = 0x{x}, .dispatch = dispatch }};\n", .{node.id()});
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("}\n\n");
+
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("fn dispatch(capnp_context: *anyopaque, capnp_method_id: u16, capnp_call: _capnp_rpc.Call) anyerror!void {\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("const self: *@This() = @ptrCast(@alignCast(capnp_context));\n");
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("switch (capnp_method_id) {\n");
+                    ctx.indenter.inc();
+                    for (0..methods.length) |i| {
+                        const method = methods.get(@intCast(i));
+                        const method_name = try method.name();
+                        const params_name = try methodTypeName(ctx, method_name, "Params");
+                        defer ctx.allocator.free(params_name);
+                        const results_name = try methodTypeName(ctx, method_name, "Results");
+                        defer ctx.allocator.free(results_name);
+
+                        try ctx.writeIndent();
+                        try ctx.writer.print("{d} => {{\n", .{i});
+                        ctx.indenter.inc();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("const params = try capnp_call.params.asStruct(");
+                        try writeReplaceKeyword(params_name, ctx.writer);
+                        try ctx.writer.writeAll(".Reader, ");
+                        try writeReplaceKeyword(params_name, ctx.writer);
+                        try ctx.writer.writeAll(".reader_trait);\n");
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("const results = try capnp_call.results.initStruct(");
+                        try writeReplaceKeyword(results_name, ctx.writer);
+                        try ctx.writer.writeAll(".Builder, ");
+                        try writeReplaceKeyword(results_name, ctx.writer);
+                        try ctx.writer.writeAll(".builder_trait);\n");
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("return self.vtable.");
+                        try writeReplaceKeyword(method_name, ctx.writer);
+                        try ctx.writer.writeAll("(self.context, params, results, capnp_call);\n");
+                        ctx.indenter.dec();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("},\n");
+                    }
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("else => return error.MethodNotFound,\n");
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("}\n");
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("}\n");
+
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("};\n");
 
                     try writeAnnotations(ctx, try node.annotations(), "annotations");
 
