@@ -461,6 +461,10 @@ pub const JoinResult = struct {
         pub fn cap(self: @This()) capnp.AnyPointerBuilder {
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
+
+        pub fn setCap(self: @This()) capnp.AnyPointerBuilder {
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
+        }
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){

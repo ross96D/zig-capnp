@@ -350,6 +350,11 @@ pub const Message = struct {
             return try self.builder.buildStructField(_Root.Message.Builder, _Root.Message.builder_trait, 0);
         }
 
+        pub fn setUnimplemented(self: @This()) capnp.BuildError!_Root.Message.Builder {
+            self.builder.writeIntField(u16, 0, 0);
+            return try self.builder.buildStructField(_Root.Message.Builder, _Root.Message.builder_trait, 0);
+        }
+
         /// Sent when a connection is being aborted due to an unrecoverable error.  This could be e.g.
         /// because the sender received an invalid or nonsensical message or because the sender had an
         /// internal error.  The sender will shut down the outgoing half of the connection after `abort`
@@ -363,11 +368,21 @@ pub const Message = struct {
             return try self.builder.buildStructField(_Root.Exception.Builder, _Root.Exception.builder_trait, 0);
         }
 
+        pub fn setAbort(self: @This()) capnp.BuildError!_Root.Exception.Builder {
+            self.builder.writeIntField(u16, 0, 1);
+            return try self.builder.buildStructField(_Root.Exception.Builder, _Root.Exception.builder_trait, 0);
+        }
+
         /// Begin a method call.
         pub fn call(self: @This()) capnp.BuildError!?_Root.Call.Builder {
             if (self.builder.readIntField(u16, 0) != 2) {
                 return null;
             }
+            return try self.builder.buildStructField(_Root.Call.Builder, _Root.Call.builder_trait, 0);
+        }
+
+        pub fn setCall(self: @This()) capnp.BuildError!_Root.Call.Builder {
+            self.builder.writeIntField(u16, 0, 2);
             return try self.builder.buildStructField(_Root.Call.Builder, _Root.Call.builder_trait, 0);
         }
 
@@ -379,11 +394,21 @@ pub const Message = struct {
             return try self.builder.buildStructField(_Root.Return.Builder, _Root.Return.builder_trait, 0);
         }
 
+        pub fn setReturn(self: @This()) capnp.BuildError!_Root.Return.Builder {
+            self.builder.writeIntField(u16, 0, 3);
+            return try self.builder.buildStructField(_Root.Return.Builder, _Root.Return.builder_trait, 0);
+        }
+
         /// Release a returned answer / cancel a call.
         pub fn finish(self: @This()) capnp.BuildError!?_Root.Finish.Builder {
             if (self.builder.readIntField(u16, 0) != 4) {
                 return null;
             }
+            return try self.builder.buildStructField(_Root.Finish.Builder, _Root.Finish.builder_trait, 0);
+        }
+
+        pub fn setFinish(self: @This()) capnp.BuildError!_Root.Finish.Builder {
+            self.builder.writeIntField(u16, 0, 4);
             return try self.builder.buildStructField(_Root.Finish.Builder, _Root.Finish.builder_trait, 0);
         }
 
@@ -395,11 +420,21 @@ pub const Message = struct {
             return try self.builder.buildStructField(_Root.Resolve.Builder, _Root.Resolve.builder_trait, 0);
         }
 
+        pub fn setResolve(self: @This()) capnp.BuildError!_Root.Resolve.Builder {
+            self.builder.writeIntField(u16, 0, 5);
+            return try self.builder.buildStructField(_Root.Resolve.Builder, _Root.Resolve.builder_trait, 0);
+        }
+
         /// Release a capability so that the remote object can be deallocated.
         pub fn release(self: @This()) capnp.BuildError!?_Root.Release.Builder {
             if (self.builder.readIntField(u16, 0) != 6) {
                 return null;
             }
+            return try self.builder.buildStructField(_Root.Release.Builder, _Root.Release.builder_trait, 0);
+        }
+
+        pub fn setRelease(self: @This()) capnp.BuildError!_Root.Release.Builder {
+            self.builder.writeIntField(u16, 0, 6);
             return try self.builder.buildStructField(_Root.Release.Builder, _Root.Release.builder_trait, 0);
         }
 
@@ -413,11 +448,21 @@ pub const Message = struct {
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
+        pub fn setObsoleteSave(self: @This()) capnp.AnyPointerBuilder {
+            self.builder.writeIntField(u16, 0, 7);
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
+        }
+
         /// Request the peer's bootstrap interface.
         pub fn bootstrap(self: @This()) capnp.BuildError!?_Root.Bootstrap.Builder {
             if (self.builder.readIntField(u16, 0) != 8) {
                 return null;
             }
+            return try self.builder.buildStructField(_Root.Bootstrap.Builder, _Root.Bootstrap.builder_trait, 0);
+        }
+
+        pub fn setBootstrap(self: @This()) capnp.BuildError!_Root.Bootstrap.Builder {
+            self.builder.writeIntField(u16, 0, 8);
             return try self.builder.buildStructField(_Root.Bootstrap.Builder, _Root.Bootstrap.builder_trait, 0);
         }
 
@@ -429,11 +474,21 @@ pub const Message = struct {
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
+        pub fn setObsoleteDelete(self: @This()) capnp.AnyPointerBuilder {
+            self.builder.writeIntField(u16, 0, 9);
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
+        }
+
         /// Provide a capability to a third party.
         pub fn provide(self: @This()) capnp.BuildError!?_Root.Provide.Builder {
             if (self.builder.readIntField(u16, 0) != 10) {
                 return null;
             }
+            return try self.builder.buildStructField(_Root.Provide.Builder, _Root.Provide.builder_trait, 0);
+        }
+
+        pub fn setProvide(self: @This()) capnp.BuildError!_Root.Provide.Builder {
+            self.builder.writeIntField(u16, 0, 10);
             return try self.builder.buildStructField(_Root.Provide.Builder, _Root.Provide.builder_trait, 0);
         }
 
@@ -445,6 +500,11 @@ pub const Message = struct {
             return try self.builder.buildStructField(_Root.Accept.Builder, _Root.Accept.builder_trait, 0);
         }
 
+        pub fn setAccept(self: @This()) capnp.BuildError!_Root.Accept.Builder {
+            self.builder.writeIntField(u16, 0, 11);
+            return try self.builder.buildStructField(_Root.Accept.Builder, _Root.Accept.builder_trait, 0);
+        }
+
         /// Directly connect to the common root of two or more proxied caps.
         pub fn join(self: @This()) capnp.BuildError!?_Root.Join.Builder {
             if (self.builder.readIntField(u16, 0) != 12) {
@@ -453,11 +513,21 @@ pub const Message = struct {
             return try self.builder.buildStructField(_Root.Join.Builder, _Root.Join.builder_trait, 0);
         }
 
+        pub fn setJoin(self: @This()) capnp.BuildError!_Root.Join.Builder {
+            self.builder.writeIntField(u16, 0, 12);
+            return try self.builder.buildStructField(_Root.Join.Builder, _Root.Join.builder_trait, 0);
+        }
+
         /// Lift an embargo used to enforce E-order over promise resolution.
         pub fn disembargo(self: @This()) capnp.BuildError!?_Root.Disembargo.Builder {
             if (self.builder.readIntField(u16, 0) != 13) {
                 return null;
             }
+            return try self.builder.buildStructField(_Root.Disembargo.Builder, _Root.Disembargo.builder_trait, 0);
+        }
+
+        pub fn setDisembargo(self: @This()) capnp.BuildError!_Root.Disembargo.Builder {
+            self.builder.writeIntField(u16, 0, 13);
             return try self.builder.buildStructField(_Root.Disembargo.Builder, _Root.Disembargo.builder_trait, 0);
         }
     };
@@ -699,6 +769,10 @@ pub const Bootstrap = struct {
         /// stops working. On the other hand, if the SturdyRef is discarded, this has no effect on the
         /// existence of the image in its collection.
         pub fn deprecatedObjectId(self: @This()) capnp.AnyPointerBuilder {
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
+        }
+
+        pub fn setDeprecatedObjectId(self: @This()) capnp.AnyPointerBuilder {
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
     };
@@ -961,6 +1035,11 @@ pub const Call = struct {
                 }
                 return self.builder.buildPtrField(capnp.AnyPointerBuilder, 2);
             }
+
+            pub fn setThirdParty(self: @This()) capnp.AnyPointerBuilder {
+                self.builder.writeIntField(u16, 3, 2);
+                return self.builder.buildPtrField(capnp.AnyPointerBuilder, 2);
+            }
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -1095,6 +1174,10 @@ pub const Call = struct {
             return try self.builder.buildStructField(_Root.MessageTarget.Builder, _Root.MessageTarget.builder_trait, 0);
         }
 
+        pub fn setTarget(self: @This()) capnp.BuildError!_Root.MessageTarget.Builder {
+            return try self.builder.buildStructField(_Root.MessageTarget.Builder, _Root.MessageTarget.builder_trait, 0);
+        }
+
         /// The type ID of the interface being called.  Each capability may implement multiple interfaces.
         pub fn interfaceId(self: @This()) u64 {
             return self.builder.readIntField(u64, 1) ^ 0;
@@ -1116,6 +1199,10 @@ pub const Call = struct {
         /// The call parameters.  `params.content` is a struct whose fields correspond to the parameters of
         /// the method.
         pub fn params(self: @This()) capnp.BuildError!_Root.Payload.Builder {
+            return try self.builder.buildStructField(_Root.Payload.Builder, _Root.Payload.builder_trait, 1);
+        }
+
+        pub fn setParams(self: @This()) capnp.BuildError!_Root.Payload.Builder {
             return try self.builder.buildStructField(_Root.Payload.Builder, _Root.Payload.builder_trait, 1);
         }
 
@@ -1389,11 +1476,21 @@ pub const Return = struct {
             return try self.builder.buildStructField(_Root.Payload.Builder, _Root.Payload.builder_trait, 0);
         }
 
+        pub fn setResults(self: @This()) capnp.BuildError!_Root.Payload.Builder {
+            self.builder.writeIntField(u16, 3, 0);
+            return try self.builder.buildStructField(_Root.Payload.Builder, _Root.Payload.builder_trait, 0);
+        }
+
         /// Indicates that the call failed and explains why.
         pub fn exception(self: @This()) capnp.BuildError!?_Root.Exception.Builder {
             if (self.builder.readIntField(u16, 3) != 1) {
                 return null;
             }
+            return try self.builder.buildStructField(_Root.Exception.Builder, _Root.Exception.builder_trait, 0);
+        }
+
+        pub fn setException(self: @This()) capnp.BuildError!_Root.Exception.Builder {
+            self.builder.writeIntField(u16, 3, 1);
             return try self.builder.buildStructField(_Root.Exception.Builder, _Root.Exception.builder_trait, 0);
         }
 
@@ -1453,6 +1550,11 @@ pub const Return = struct {
             if (self.builder.readIntField(u16, 3) != 5) {
                 return null;
             }
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
+        }
+
+        pub fn setAcceptFromThirdParty(self: @This()) capnp.AnyPointerBuilder {
+            self.builder.writeIntField(u16, 3, 5);
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
@@ -1778,11 +1880,21 @@ pub const Resolve = struct {
             return try self.builder.buildStructField(_Root.CapDescriptor.Builder, _Root.CapDescriptor.builder_trait, 0);
         }
 
+        pub fn setCap(self: @This()) capnp.BuildError!_Root.CapDescriptor.Builder {
+            self.builder.writeIntField(u16, 2, 0);
+            return try self.builder.buildStructField(_Root.CapDescriptor.Builder, _Root.CapDescriptor.builder_trait, 0);
+        }
+
         /// Indicates that the promise was broken.
         pub fn exception(self: @This()) capnp.BuildError!?_Root.Exception.Builder {
             if (self.builder.readIntField(u16, 2) != 1) {
                 return null;
             }
+            return try self.builder.buildStructField(_Root.Exception.Builder, _Root.Exception.builder_trait, 0);
+        }
+
+        pub fn setException(self: @This()) capnp.BuildError!_Root.Exception.Builder {
+            self.builder.writeIntField(u16, 2, 1);
             return try self.builder.buildStructField(_Root.Exception.Builder, _Root.Exception.builder_trait, 0);
         }
     };
@@ -2203,6 +2315,10 @@ pub const Disembargo = struct {
             return try self.builder.buildStructField(_Root.MessageTarget.Builder, _Root.MessageTarget.builder_trait, 0);
         }
 
+        pub fn setTarget(self: @This()) capnp.BuildError!_Root.MessageTarget.Builder {
+            return try self.builder.buildStructField(_Root.MessageTarget.Builder, _Root.MessageTarget.builder_trait, 0);
+        }
+
         pub fn context(self: @This()) _Root.Disembargo.context.Builder {
             return .{ .builder = self.builder };
         }
@@ -2292,8 +2408,16 @@ pub const Provide = struct {
             return try self.builder.buildStructField(_Root.MessageTarget.Builder, _Root.MessageTarget.builder_trait, 0);
         }
 
+        pub fn setTarget(self: @This()) capnp.BuildError!_Root.MessageTarget.Builder {
+            return try self.builder.buildStructField(_Root.MessageTarget.Builder, _Root.MessageTarget.builder_trait, 0);
+        }
+
         /// Identity of the third party that is expected to pick up the capability.
         pub fn recipient(self: @This()) capnp.AnyPointerBuilder {
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 1);
+        }
+
+        pub fn setRecipient(self: @This()) capnp.AnyPointerBuilder {
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 1);
         }
     };
@@ -2406,6 +2530,10 @@ pub const Accept = struct {
 
         /// Identifies the provided object to be picked up.
         pub fn provision(self: @This()) capnp.AnyPointerBuilder {
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
+        }
+
+        pub fn setProvision(self: @This()) capnp.AnyPointerBuilder {
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
@@ -2586,9 +2714,17 @@ pub const Join = struct {
             return try self.builder.buildStructField(_Root.MessageTarget.Builder, _Root.MessageTarget.builder_trait, 0);
         }
 
+        pub fn setTarget(self: @This()) capnp.BuildError!_Root.MessageTarget.Builder {
+            return try self.builder.buildStructField(_Root.MessageTarget.Builder, _Root.MessageTarget.builder_trait, 0);
+        }
+
         /// A part of the join key.  These combine to form the complete join key, which is used to establish
         /// a direct connection.
         pub fn keyPart(self: @This()) capnp.AnyPointerBuilder {
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 1);
+        }
+
+        pub fn setKeyPart(self: @This()) capnp.AnyPointerBuilder {
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 1);
         }
     };
@@ -2702,6 +2838,11 @@ pub const MessageTarget = struct {
             }
             return try self.builder.buildStructField(_Root.PromisedAnswer.Builder, _Root.PromisedAnswer.builder_trait, 0);
         }
+
+        pub fn setPromisedAnswer(self: @This()) capnp.BuildError!_Root.PromisedAnswer.Builder {
+            self.builder.writeIntField(u16, 2, 1);
+            return try self.builder.buildStructField(_Root.PromisedAnswer.Builder, _Root.PromisedAnswer.builder_trait, 0);
+        }
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -2763,8 +2904,16 @@ pub const Payload = struct {
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
+        pub fn setContent(self: @This()) capnp.AnyPointerBuilder {
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
+        }
+
         /// Descriptors corresponding to the cap pointers in `content`.
         pub fn capTable(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.CapDescriptor.Builder, _Root.CapDescriptor.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CapDescriptor.Builder, _Root.CapDescriptor.builder_trait), 1);
+        }
+
+        pub fn setCapTable(self: @This()) capnp.CompositeListBuilder(_Root.CapDescriptor.Builder, _Root.CapDescriptor.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CapDescriptor.Builder, _Root.CapDescriptor.builder_trait), 1);
         }
     };
@@ -3061,6 +3210,11 @@ pub const CapDescriptor = struct {
             return try self.builder.buildStructField(_Root.PromisedAnswer.Builder, _Root.PromisedAnswer.builder_trait, 0);
         }
 
+        pub fn setReceiverAnswer(self: @This()) capnp.BuildError!_Root.PromisedAnswer.Builder {
+            self.builder.writeIntField(u16, 0, 4);
+            return try self.builder.buildStructField(_Root.PromisedAnswer.Builder, _Root.PromisedAnswer.builder_trait, 0);
+        }
+
         /// **(level 3)**
         ///
         /// A capability that lives in neither the sender's nor the receiver's vat.  The sender needs
@@ -3072,6 +3226,11 @@ pub const CapDescriptor = struct {
             if (self.builder.readIntField(u16, 0) != 5) {
                 return null;
             }
+            return try self.builder.buildStructField(_Root.ThirdPartyCapDescriptor.Builder, _Root.ThirdPartyCapDescriptor.builder_trait, 0);
+        }
+
+        pub fn setThirdPartyHosted(self: @This()) capnp.BuildError!_Root.ThirdPartyCapDescriptor.Builder {
+            self.builder.writeIntField(u16, 0, 5);
             return try self.builder.buildStructField(_Root.ThirdPartyCapDescriptor.Builder, _Root.ThirdPartyCapDescriptor.builder_trait, 0);
         }
 
@@ -3325,6 +3484,10 @@ pub const PromisedAnswer = struct {
         pub fn transform(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.PromisedAnswer.Op.Builder, _Root.PromisedAnswer.Op.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.PromisedAnswer.Op.Builder, _Root.PromisedAnswer.Op.builder_trait), 0);
         }
+
+        pub fn setTransform(self: @This()) capnp.CompositeListBuilder(_Root.PromisedAnswer.Op.Builder, _Root.PromisedAnswer.Op.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.PromisedAnswer.Op.Builder, _Root.PromisedAnswer.Op.builder_trait), 0);
+        }
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -3396,6 +3559,10 @@ pub const ThirdPartyCapDescriptor = struct {
 
         /// Identifies the third-party host and the specific capability to accept from it.
         pub fn id(self: @This()) capnp.AnyPointerBuilder {
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
+        }
+
+        pub fn setId(self: @This()) capnp.AnyPointerBuilder {
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 

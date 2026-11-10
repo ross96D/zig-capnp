@@ -86,7 +86,7 @@ pub fn build(b: *std.Build) void {
     const rpc_tests_mod = b.createModule(.{
         .target = target,
         .optimize = optimize,
-        .root_source_file = b.path("src/rpc_tests.zig"),
+        .root_source_file = b.path("src/rpc/rpc_tests.zig"),
         .imports = &.{
             .{ .name = "capnp", .module = capnp_mod },
         },
@@ -129,6 +129,7 @@ pub fn build(b: *std.Build) void {
     generate_codegen.addArtifactArg(compiler_exe);
     generate_codegen.setCwd(b.path("."));
     codegen_tests.step.dependOn(&generate_codegen.step);
+    compiler_tests.step.dependOn(&generate_codegen.step);
 
     const run_codegen_tests = b.addRunArtifact(codegen_tests);
 
