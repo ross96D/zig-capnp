@@ -205,6 +205,10 @@ pub const Node = struct {
             pub fn fields(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Field.Builder, _Root.Field.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Field.Builder, _Root.Field.builder_trait), 3);
             }
+
+            pub fn setFields(self: @This()) capnp.CompositeListBuilder(_Root.Field.Builder, _Root.Field.builder_trait) {
+                return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Field.Builder, _Root.Field.builder_trait), 3);
+            }
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -255,6 +259,10 @@ pub const Node = struct {
 
             /// Enumerants ordered by numeric value (ordinal).
             pub fn enumerants(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Enumerant.Builder, _Root.Enumerant.builder_trait) {
+                return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Enumerant.Builder, _Root.Enumerant.builder_trait), 3);
+            }
+
+            pub fn setEnumerants(self: @This()) capnp.CompositeListBuilder(_Root.Enumerant.Builder, _Root.Enumerant.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Enumerant.Builder, _Root.Enumerant.builder_trait), 3);
             }
         };
@@ -315,8 +323,16 @@ pub const Node = struct {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Method.Builder, _Root.Method.builder_trait), 3);
             }
 
+            pub fn setMethods(self: @This()) capnp.CompositeListBuilder(_Root.Method.Builder, _Root.Method.builder_trait) {
+                return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Method.Builder, _Root.Method.builder_trait), 3);
+            }
+
             /// Superclasses of this interface.
             pub fn superclasses(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Superclass.Builder, _Root.Superclass.builder_trait) {
+                return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Superclass.Builder, _Root.Superclass.builder_trait), 4);
+            }
+
+            pub fn setSuperclasses(self: @This()) capnp.CompositeListBuilder(_Root.Superclass.Builder, _Root.Superclass.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Superclass.Builder, _Root.Superclass.builder_trait), 4);
             }
         };
@@ -374,7 +390,15 @@ pub const Node = struct {
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 3);
             }
 
+            pub fn setType(self: @This()) capnp.BuildError!_Root.Type.Builder {
+                return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 3);
+            }
+
             pub fn value(self: @This()) capnp.BuildError!_Root.Value.Builder {
+                return try self.builder.buildStructField(_Root.Value.Builder, _Root.Value.builder_trait, 4);
+            }
+
+            pub fn setValue(self: @This()) capnp.BuildError!_Root.Value.Builder {
                 return try self.builder.buildStructField(_Root.Value.Builder, _Root.Value.builder_trait, 4);
             }
         };
@@ -473,6 +497,10 @@ pub const Node = struct {
             }
 
             pub fn @"type"(self: @This()) capnp.BuildError!_Root.Type.Builder {
+                return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 3);
+            }
+
+            pub fn setType(self: @This()) capnp.BuildError!_Root.Type.Builder {
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 3);
             }
 
@@ -859,6 +887,10 @@ pub const Node = struct {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.SourceInfo.Member.Builder, _Root.Node.SourceInfo.Member.builder_trait), 1);
             }
 
+            pub fn setMembers(self: @This()) capnp.CompositeListBuilder(_Root.Node.SourceInfo.Member.Builder, _Root.Node.SourceInfo.Member.builder_trait) {
+                return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.SourceInfo.Member.Builder, _Root.Node.SourceInfo.Member.builder_trait), 1);
+            }
+
             pub fn startByte(self: @This()) u32 {
                 return self.builder.readIntField(u32, 2) ^ 0;
             }
@@ -1068,8 +1100,16 @@ pub const Node = struct {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.NestedNode.Builder, _Root.Node.NestedNode.builder_trait), 1);
         }
 
+        pub fn setNestedNodes(self: @This()) capnp.CompositeListBuilder(_Root.Node.NestedNode.Builder, _Root.Node.NestedNode.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.NestedNode.Builder, _Root.Node.NestedNode.builder_trait), 1);
+        }
+
         /// Annotations applied to this node.
         pub fn annotations(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 2);
+        }
+
+        pub fn setAnnotations(self: @This()) capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 2);
         }
 
@@ -1147,6 +1187,10 @@ pub const Node = struct {
 
         /// If this node is parameterized (generic), the list of parameters. Empty for non-generic types.
         pub fn parameters(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait), 5);
+        }
+
+        pub fn setParameters(self: @This()) capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait), 5);
         }
 
@@ -1269,7 +1313,15 @@ pub const Field = struct {
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 2);
             }
 
+            pub fn setType(self: @This()) capnp.BuildError!_Root.Type.Builder {
+                return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 2);
+            }
+
             pub fn defaultValue(self: @This()) capnp.BuildError!_Root.Value.Builder {
+                return try self.builder.buildStructField(_Root.Value.Builder, _Root.Value.builder_trait, 3);
+            }
+
+            pub fn setDefaultValue(self: @This()) capnp.BuildError!_Root.Value.Builder {
                 return try self.builder.buildStructField(_Root.Value.Builder, _Root.Value.builder_trait, 3);
             }
 
@@ -1566,6 +1618,10 @@ pub const Field = struct {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 1);
         }
 
+        pub fn setAnnotations(self: @This()) capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 1);
+        }
+
         /// If the field is in a union, this is the value which the union's discriminant should take when
         /// the field is active.  If the field is not in a union, this is 0xffff.
         pub fn discriminantValue(self: @This()) u16 {
@@ -1684,6 +1740,10 @@ pub const Enumerant = struct {
         pub fn annotations(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 1);
         }
+
+        pub fn setAnnotations(self: @This()) capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 1);
+        }
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -1744,6 +1804,10 @@ pub const Superclass = struct {
         }
 
         pub fn brand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
+            return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 0);
+        }
+
+        pub fn setBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
             return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 0);
         }
     };
@@ -1882,8 +1946,16 @@ pub const Method = struct {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 1);
         }
 
+        pub fn setAnnotations(self: @This()) capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 1);
+        }
+
         /// Brand of param struct type.
         pub fn paramBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
+            return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 2);
+        }
+
+        pub fn setParamBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
             return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 2);
         }
 
@@ -1892,9 +1964,17 @@ pub const Method = struct {
             return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 3);
         }
 
+        pub fn setResultBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
+            return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 3);
+        }
+
         /// The parameters listed in [] (typically, type / generic parameters), whose bindings are intended
         /// to be inferred rather than specified explicitly, although not all languages support this.
         pub fn implicitParameters(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait), 4);
+        }
+
+        pub fn setImplicitParameters(self: @This()) capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait), 4);
         }
     };
@@ -1974,6 +2054,10 @@ pub const Type = struct {
             pub fn elementType(self: @This()) capnp.BuildError!_Root.Type.Builder {
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 0);
             }
+
+            pub fn setElementType(self: @This()) capnp.BuildError!_Root.Type.Builder {
+                return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 0);
+            }
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -2034,6 +2118,10 @@ pub const Type = struct {
             }
 
             pub fn brand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
+                return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 0);
+            }
+
+            pub fn setBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
                 return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 0);
             }
         };
@@ -2098,6 +2186,10 @@ pub const Type = struct {
             pub fn brand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
                 return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 0);
             }
+
+            pub fn setBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
+                return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 0);
+            }
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -2158,6 +2250,10 @@ pub const Type = struct {
             }
 
             pub fn brand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
+                return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 0);
+            }
+
+            pub fn setBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
                 return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 0);
             }
         };
@@ -3116,6 +3212,11 @@ pub const Brand = struct {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Brand.Binding.Builder, _Root.Brand.Binding.builder_trait), 0);
             }
 
+            pub fn setBind(self: @This()) capnp.CompositeListBuilder(_Root.Brand.Binding.Builder, _Root.Brand.Binding.builder_trait) {
+                self.builder.writeIntField(u16, 4, 0);
+                return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Brand.Binding.Builder, _Root.Brand.Binding.builder_trait), 0);
+            }
+
             /// The place where the Brand appears is within this scope or a sub-scope, and bindings
             /// for this scope are deferred to later Brand applications. This is equivalent to a
             /// pass-through binding list, where each of this scope's parameters is bound to itself.
@@ -3231,6 +3332,11 @@ pub const Brand = struct {
                 }
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 0);
             }
+
+            pub fn setType(self: @This()) capnp.BuildError!_Root.Type.Builder {
+                self.builder.writeIntField(u16, 0, 1);
+                return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 0);
+            }
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -3282,6 +3388,10 @@ pub const Brand = struct {
         /// in this list. If no parameterization is included for a particular relevant scope, then either
         /// that scope has no parameters or all parameters should be considered to be `AnyPointer`.
         pub fn scopes(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Brand.Scope.Builder, _Root.Brand.Scope.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Brand.Scope.Builder, _Root.Brand.Scope.builder_trait), 0);
+        }
+
+        pub fn setScopes(self: @This()) capnp.CompositeListBuilder(_Root.Brand.Scope.Builder, _Root.Brand.Scope.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Brand.Scope.Builder, _Root.Brand.Scope.builder_trait), 0);
         }
     };
@@ -3671,6 +3781,11 @@ pub const Value = struct {
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
+        pub fn setList(self: @This()) capnp.AnyPointerBuilder {
+            self.builder.writeIntField(u16, 0, 14);
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
+        }
+
         pub fn @"enum"(self: @This()) ?u16 {
             if (self.builder.readIntField(u16, 0) != 15) {
                 return null;
@@ -3687,6 +3802,11 @@ pub const Value = struct {
             if (self.builder.readIntField(u16, 0) != 16) {
                 return null;
             }
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
+        }
+
+        pub fn setStruct(self: @This()) capnp.AnyPointerBuilder {
+            self.builder.writeIntField(u16, 0, 16);
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
@@ -3708,6 +3828,11 @@ pub const Value = struct {
             if (self.builder.readIntField(u16, 0) != 18) {
                 return null;
             }
+            return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
+        }
+
+        pub fn setAnyPointer(self: @This()) capnp.AnyPointerBuilder {
+            self.builder.writeIntField(u16, 0, 18);
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
     };
@@ -3784,10 +3909,18 @@ pub const Annotation = struct {
             return try self.builder.buildStructField(_Root.Value.Builder, _Root.Value.builder_trait, 0);
         }
 
+        pub fn setValue(self: @This()) capnp.BuildError!_Root.Value.Builder {
+            return try self.builder.buildStructField(_Root.Value.Builder, _Root.Value.builder_trait, 0);
+        }
+
         /// Brand of the annotation.
         ///
         /// Note that the annotation itself is not allowed to be parameterized, but its scope might be.
         pub fn brand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
+            return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 1);
+        }
+
+        pub fn setBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
             return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 1);
         }
     };
@@ -4209,6 +4342,10 @@ pub const CodeGeneratorRequest = struct {
                 pub fn identifiers(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.builder_trait) {
                     return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.builder_trait), 0);
                 }
+
+                pub fn setIdentifiers(self: @This()) capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.builder_trait) {
+                    return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.builder_trait), 0);
+                }
             };
 
             pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -4293,7 +4430,15 @@ pub const CodeGeneratorRequest = struct {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Import.Builder, _Root.CodeGeneratorRequest.RequestedFile.Import.builder_trait), 1);
             }
 
+            pub fn setImports(self: @This()) capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Import.Builder, _Root.CodeGeneratorRequest.RequestedFile.Import.builder_trait) {
+                return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Import.Builder, _Root.CodeGeneratorRequest.RequestedFile.Import.builder_trait), 1);
+            }
+
             pub fn fileSourceInfo(self: @This()) capnp.BuildError!_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Builder {
+                return try self.builder.buildStructField(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.builder_trait, 2);
+            }
+
+            pub fn setFileSourceInfo(self: @This()) capnp.BuildError!_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Builder {
                 return try self.builder.buildStructField(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.builder_trait, 2);
             }
         };
@@ -4369,8 +4514,16 @@ pub const CodeGeneratorRequest = struct {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.Builder, _Root.Node.builder_trait), 0);
         }
 
+        pub fn setNodes(self: @This()) capnp.CompositeListBuilder(_Root.Node.Builder, _Root.Node.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.Builder, _Root.Node.builder_trait), 0);
+        }
+
         /// Files which were listed on the command line.
         pub fn requestedFiles(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Builder, _Root.CodeGeneratorRequest.RequestedFile.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Builder, _Root.CodeGeneratorRequest.RequestedFile.builder_trait), 1);
+        }
+
+        pub fn setRequestedFiles(self: @This()) capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Builder, _Root.CodeGeneratorRequest.RequestedFile.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Builder, _Root.CodeGeneratorRequest.RequestedFile.builder_trait), 1);
         }
 
@@ -4384,9 +4537,17 @@ pub const CodeGeneratorRequest = struct {
             return try self.builder.buildStructField(_Root.CapnpVersion.Builder, _Root.CapnpVersion.builder_trait, 2);
         }
 
+        pub fn setCapnpVersion(self: @This()) capnp.BuildError!_Root.CapnpVersion.Builder {
+            return try self.builder.buildStructField(_Root.CapnpVersion.Builder, _Root.CapnpVersion.builder_trait, 2);
+        }
+
         /// Information about the original source code for each node, where available. This array may be
         /// omitted or may be missing some nodes if no info is available for them.
         pub fn sourceInfo(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Node.SourceInfo.Builder, _Root.Node.SourceInfo.builder_trait) {
+            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.SourceInfo.Builder, _Root.Node.SourceInfo.builder_trait), 3);
+        }
+
+        pub fn setSourceInfo(self: @This()) capnp.CompositeListBuilder(_Root.Node.SourceInfo.Builder, _Root.Node.SourceInfo.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.SourceInfo.Builder, _Root.Node.SourceInfo.builder_trait), 3);
         }
     };

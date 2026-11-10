@@ -1677,6 +1677,41 @@ pub fn Refactor(comptime W: type) type {
                             try ctx.closeSetter();
                         },
 
+                        .@"struct" => {
+                            try ctx.writeIndent();
+                            try ctx.writer.print("pub fn set{f}(self: @This()) ", .{capitalized(try field.name())});
+                            try writeType(ctx, t, .builder_getter, true, false);
+                            try ctx.writer.writeAll(" {\n");
+                            ctx.indenter.inc();
+                            try writeDiscriminant(ctx, discriminant_offset, field);
+                            try ctx.writeIndent();
+                            try ctx.writer.writeAll("return try self.builder.buildStructField(");
+                            try writeType(ctx, t, .builder_getter, false, false);
+                            try ctx.writer.writeAll(", ");
+                            try writeType(ctx, t, .base, false, false);
+                            try ctx.writer.writeAll(".builder_trait, ");
+                            try ctx.writer.print("{d});\n", .{slot.offset()});
+                            ctx.indenter.dec();
+                            try ctx.writeIndent();
+                            try ctx.writer.writeAll("}\n");
+                        },
+
+                        .list, .anyPointer, .interface => {
+                            try ctx.writeIndent();
+                            try ctx.writer.print("pub fn set{f}(self: @This()) ", .{capitalized(try field.name())});
+                            try writeType(ctx, t, .builder_getter, false, false);
+                            try ctx.writer.writeAll(" {\n");
+                            ctx.indenter.inc();
+                            try writeDiscriminant(ctx, discriminant_offset, field);
+                            try ctx.writeIndent();
+                            try ctx.writer.writeAll("return self.builder.buildPtrField(");
+                            try writeType(ctx, t, .builder_getter, false, false);
+                            try ctx.writer.print(", {d});\n", .{slot.offset()});
+                            ctx.indenter.dec();
+                            try ctx.writeIndent();
+                            try ctx.writer.writeAll("}\n");
+                        },
+
                         else => {},
                     }
                 },

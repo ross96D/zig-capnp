@@ -382,6 +382,13 @@ pub const AnyPointerReader = struct {
             else => Error.TypeMismatch,
         };
     }
+
+    pub fn asCapability(self: AnyPointerReader) Error!u32 {
+        return switch (self.ptr) {
+            .capability => |capability| capability.index,
+            else => Error.TypeMismatch,
+        };
+    }
 };
 
 pub const AnyPointerBuilder = struct {
@@ -420,6 +427,12 @@ pub const AnyPointerBuilder = struct {
     pub fn setFromReader(self: AnyPointerBuilder, source: AnyPointerReader) BuildError!void {
         var context = self.context;
         try context.builder.copyPointerTo(&context, source);
+    }
+
+    pub fn setCapability(self: AnyPointerBuilder, index: u32) void {
+        var context = self.context;
+        const raw: u64 = 3 | (@as(u64, index) << 32);
+        context.writePtr(Ptr{ .capability = @bitCast(raw) });
     }
 
     pub fn clear(self: AnyPointerBuilder) void {
