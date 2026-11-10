@@ -26,16 +26,16 @@ pub const Node = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             /// Size of the data section, in words.
@@ -110,12 +110,12 @@ pub const Node = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             /// Size of the data section, in words.
@@ -220,16 +220,16 @@ pub const Node = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             /// Enumerants ordered by numeric value (ordinal).
@@ -245,12 +245,12 @@ pub const Node = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             /// Enumerants ordered by numeric value (ordinal).
@@ -272,16 +272,16 @@ pub const Node = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             /// Methods ordered by ordinal.
@@ -302,12 +302,12 @@ pub const Node = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             /// Methods ordered by ordinal.
@@ -334,16 +334,16 @@ pub const Node = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             pub fn @"type"(self: @This()) capnp.Error!_Root.Type.Reader {
@@ -362,12 +362,12 @@ pub const Node = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             pub fn @"type"(self: @This()) capnp.BuildError!_Root.Type.Builder {
@@ -392,16 +392,16 @@ pub const Node = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             pub fn @"type"(self: @This()) capnp.Error!_Root.Type.Reader {
@@ -464,12 +464,12 @@ pub const Node = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             pub fn @"type"(self: @This()) capnp.BuildError!_Root.Type.Builder {
@@ -587,16 +587,16 @@ pub const Node = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             pub fn name(self: @This()) capnp.Error![:0]const u8 {
@@ -611,12 +611,12 @@ pub const Node = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             pub fn name(self: @This()) capnp.BuildError![:0]const u8 {
@@ -641,16 +641,16 @@ pub const Node = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             /// Unqualified symbol name.  Unlike Node.displayName, this *can* be used programmatically.
@@ -674,12 +674,12 @@ pub const Node = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             /// Unqualified symbol name.  Unlike Node.displayName, this *can* be used programmatically.
@@ -724,16 +724,16 @@ pub const Node = struct {
             pub const Reader = struct {
                 reader: capnp.StructReader,
 
-                pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                    return .{ .reader = reader };
+                pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                    return .{ .reader = capnp_reader };
                 }
 
-                pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+                pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
                 }
 
-                pub fn fromNull(context: capnp.ReadContext) @This() {
-                    return @This().fromStructReader(capnp.StructReader.fromNull(context));
+                pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                    return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
                 }
 
                 /// Doc comment on the member.
@@ -749,12 +749,12 @@ pub const Node = struct {
             pub const Builder = struct {
                 builder: capnp.StructBuilder,
 
-                pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                    return .{ .builder = builder };
+                pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                    return .{ .builder = capnp_builder };
                 }
 
-                pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                    return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+                pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
                 }
 
                 /// Doc comment on the member.
@@ -777,16 +777,16 @@ pub const Node = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             /// ID of the Node which this info describes.
@@ -824,12 +824,12 @@ pub const Node = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             /// ID of the Node which this info describes.
@@ -886,16 +886,16 @@ pub const Node = struct {
     pub const Reader = struct {
         reader: capnp.StructReader,
 
-        pub fn fromStructReader(reader: capnp.StructReader) @This() {
-            return .{ .reader = reader };
+        pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+            return .{ .reader = capnp_reader };
         }
 
-        pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-            return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+        pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+            return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
         }
 
-        pub fn fromNull(context: capnp.ReadContext) @This() {
-            return @This().fromStructReader(capnp.StructReader.fromNull(context));
+        pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+            return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
         }
 
         pub fn which(self: @This()) _Root.Node.Tag {
@@ -1008,12 +1008,12 @@ pub const Node = struct {
     pub const Builder = struct {
         builder: capnp.StructBuilder,
 
-        pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-            return .{ .builder = builder };
+        pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+            return .{ .builder = capnp_builder };
         }
 
-        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
         pub fn which(self: @This()) _Root.Node.Tag {
@@ -1203,16 +1203,16 @@ pub const Field = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             /// Offset, in units of the field's size, from the beginning of the section in which the field
@@ -1246,12 +1246,12 @@ pub const Field = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             /// Offset, in units of the field's size, from the beginning of the section in which the field
@@ -1300,16 +1300,16 @@ pub const Field = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             /// The ID of the group's node.
@@ -1325,12 +1325,12 @@ pub const Field = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             /// The ID of the group's node.
@@ -1366,16 +1366,16 @@ pub const Field = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             pub fn which(self: @This()) _Root.Field.ordinal.Tag {
@@ -1408,12 +1408,12 @@ pub const Field = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             pub fn which(self: @This()) _Root.Field.ordinal.Tag {
@@ -1460,16 +1460,16 @@ pub const Field = struct {
     pub const Reader = struct {
         reader: capnp.StructReader,
 
-        pub fn fromStructReader(reader: capnp.StructReader) @This() {
-            return .{ .reader = reader };
+        pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+            return .{ .reader = capnp_reader };
         }
 
-        pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-            return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+        pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+            return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
         }
 
-        pub fn fromNull(context: capnp.ReadContext) @This() {
-            return @This().fromStructReader(capnp.StructReader.fromNull(context));
+        pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+            return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
         }
 
         pub fn which(self: @This()) _Root.Field.Tag {
@@ -1528,12 +1528,12 @@ pub const Field = struct {
     pub const Builder = struct {
         builder: capnp.StructBuilder,
 
-        pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-            return .{ .builder = builder };
+        pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+            return .{ .builder = capnp_builder };
         }
 
-        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
         pub fn which(self: @This()) _Root.Field.Tag {
@@ -1621,16 +1621,16 @@ pub const Enumerant = struct {
     pub const Reader = struct {
         reader: capnp.StructReader,
 
-        pub fn fromStructReader(reader: capnp.StructReader) @This() {
-            return .{ .reader = reader };
+        pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+            return .{ .reader = capnp_reader };
         }
 
-        pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-            return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+        pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+            return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
         }
 
-        pub fn fromNull(context: capnp.ReadContext) @This() {
-            return @This().fromStructReader(capnp.StructReader.fromNull(context));
+        pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+            return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
         }
 
         pub fn name(self: @This()) capnp.Error![:0]const u8 {
@@ -1655,12 +1655,12 @@ pub const Enumerant = struct {
     pub const Builder = struct {
         builder: capnp.StructBuilder,
 
-        pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-            return .{ .builder = builder };
+        pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+            return .{ .builder = capnp_builder };
         }
 
-        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
         pub fn name(self: @This()) capnp.BuildError![:0]const u8 {
@@ -1699,16 +1699,16 @@ pub const Superclass = struct {
     pub const Reader = struct {
         reader: capnp.StructReader,
 
-        pub fn fromStructReader(reader: capnp.StructReader) @This() {
-            return .{ .reader = reader };
+        pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+            return .{ .reader = capnp_reader };
         }
 
-        pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-            return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+        pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+            return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
         }
 
-        pub fn fromNull(context: capnp.ReadContext) @This() {
-            return @This().fromStructReader(capnp.StructReader.fromNull(context));
+        pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+            return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
         }
 
         pub fn id(self: @This()) u64 {
@@ -1727,12 +1727,12 @@ pub const Superclass = struct {
     pub const Builder = struct {
         builder: capnp.StructBuilder,
 
-        pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-            return .{ .builder = builder };
+        pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+            return .{ .builder = capnp_builder };
         }
 
-        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
         pub fn id(self: @This()) u64 {
@@ -1762,16 +1762,16 @@ pub const Method = struct {
     pub const Reader = struct {
         reader: capnp.StructReader,
 
-        pub fn fromStructReader(reader: capnp.StructReader) @This() {
-            return .{ .reader = reader };
+        pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+            return .{ .reader = capnp_reader };
         }
 
-        pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-            return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+        pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+            return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
         }
 
-        pub fn fromNull(context: capnp.ReadContext) @This() {
-            return @This().fromStructReader(capnp.StructReader.fromNull(context));
+        pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+            return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
         }
 
         pub fn name(self: @This()) capnp.Error![:0]const u8 {
@@ -1828,12 +1828,12 @@ pub const Method = struct {
     pub const Builder = struct {
         builder: capnp.StructBuilder,
 
-        pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-            return .{ .builder = builder };
+        pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+            return .{ .builder = capnp_builder };
         }
 
-        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
         pub fn name(self: @This()) capnp.BuildError![:0]const u8 {
@@ -1939,16 +1939,16 @@ pub const Type = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             pub fn elementType(self: @This()) capnp.Error!_Root.Type.Reader {
@@ -1963,12 +1963,12 @@ pub const Type = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             pub fn elementType(self: @This()) capnp.BuildError!_Root.Type.Builder {
@@ -1989,16 +1989,16 @@ pub const Type = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             pub fn typeId(self: @This()) u64 {
@@ -2017,12 +2017,12 @@ pub const Type = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             pub fn typeId(self: @This()) u64 {
@@ -2051,16 +2051,16 @@ pub const Type = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             pub fn typeId(self: @This()) u64 {
@@ -2079,12 +2079,12 @@ pub const Type = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             pub fn typeId(self: @This()) u64 {
@@ -2113,16 +2113,16 @@ pub const Type = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             pub fn typeId(self: @This()) u64 {
@@ -2141,12 +2141,12 @@ pub const Type = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             pub fn typeId(self: @This()) u64 {
@@ -2210,16 +2210,16 @@ pub const Type = struct {
             pub const Reader = struct {
                 reader: capnp.StructReader,
 
-                pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                    return .{ .reader = reader };
+                pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                    return .{ .reader = capnp_reader };
                 }
 
-                pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+                pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
                 }
 
-                pub fn fromNull(context: capnp.ReadContext) @This() {
-                    return @This().fromStructReader(capnp.StructReader.fromNull(context));
+                pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                    return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
                 }
 
                 pub fn which(self: @This()) _Root.Type.anyPointer.unconstrained.Tag {
@@ -2266,12 +2266,12 @@ pub const Type = struct {
             pub const Builder = struct {
                 builder: capnp.StructBuilder,
 
-                pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                    return .{ .builder = builder };
+                pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                    return .{ .builder = capnp_builder };
                 }
 
-                pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                    return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+                pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
                 }
 
                 pub fn which(self: @This()) _Root.Type.anyPointer.unconstrained.Tag {
@@ -2345,16 +2345,16 @@ pub const Type = struct {
             pub const Reader = struct {
                 reader: capnp.StructReader,
 
-                pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                    return .{ .reader = reader };
+                pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                    return .{ .reader = capnp_reader };
                 }
 
-                pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+                pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
                 }
 
-                pub fn fromNull(context: capnp.ReadContext) @This() {
-                    return @This().fromStructReader(capnp.StructReader.fromNull(context));
+                pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                    return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
                 }
 
                 /// ID of the generic type whose parameter we're referencing. This is always either the
@@ -2376,12 +2376,12 @@ pub const Type = struct {
             pub const Builder = struct {
                 builder: capnp.StructBuilder,
 
-                pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                    return .{ .builder = builder };
+                pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                    return .{ .builder = capnp_builder };
                 }
 
-                pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                    return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+                pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
                 }
 
                 /// ID of the generic type whose parameter we're referencing. This is always either the
@@ -2419,16 +2419,16 @@ pub const Type = struct {
             pub const Reader = struct {
                 reader: capnp.StructReader,
 
-                pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                    return .{ .reader = reader };
+                pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                    return .{ .reader = capnp_reader };
                 }
 
-                pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+                pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
                 }
 
-                pub fn fromNull(context: capnp.ReadContext) @This() {
-                    return @This().fromStructReader(capnp.StructReader.fromNull(context));
+                pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                    return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
                 }
 
                 pub fn parameterIndex(self: @This()) u16 {
@@ -2443,12 +2443,12 @@ pub const Type = struct {
             pub const Builder = struct {
                 builder: capnp.StructBuilder,
 
-                pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                    return .{ .builder = builder };
+                pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                    return .{ .builder = capnp_builder };
                 }
 
-                pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                    return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+                pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
                 }
 
                 pub fn parameterIndex(self: @This()) u16 {
@@ -2470,16 +2470,16 @@ pub const Type = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             pub fn which(self: @This()) _Root.Type.anyPointer.Tag {
@@ -2523,12 +2523,12 @@ pub const Type = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             pub fn which(self: @This()) _Root.Type.anyPointer.Tag {
@@ -2590,16 +2590,16 @@ pub const Type = struct {
     pub const Reader = struct {
         reader: capnp.StructReader,
 
-        pub fn fromStructReader(reader: capnp.StructReader) @This() {
-            return .{ .reader = reader };
+        pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+            return .{ .reader = capnp_reader };
         }
 
-        pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-            return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+        pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+            return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
         }
 
-        pub fn fromNull(context: capnp.ReadContext) @This() {
-            return @This().fromStructReader(capnp.StructReader.fromNull(context));
+        pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+            return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
         }
 
         pub fn which(self: @This()) _Root.Type.Tag {
@@ -2747,12 +2747,12 @@ pub const Type = struct {
     pub const Builder = struct {
         builder: capnp.StructBuilder,
 
-        pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-            return .{ .builder = builder };
+        pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+            return .{ .builder = capnp_builder };
         }
 
-        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
         pub fn which(self: @This()) _Root.Type.Tag {
@@ -3028,16 +3028,16 @@ pub const Brand = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             pub fn which(self: @This()) _Root.Brand.Scope.Tag {
@@ -3087,12 +3087,12 @@ pub const Brand = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             pub fn which(self: @This()) _Root.Brand.Scope.Tag {
@@ -3163,16 +3163,16 @@ pub const Brand = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             pub fn which(self: @This()) _Root.Brand.Binding.Tag {
@@ -3201,12 +3201,12 @@ pub const Brand = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             pub fn which(self: @This()) _Root.Brand.Binding.Tag {
@@ -3243,16 +3243,16 @@ pub const Brand = struct {
     pub const Reader = struct {
         reader: capnp.StructReader,
 
-        pub fn fromStructReader(reader: capnp.StructReader) @This() {
-            return .{ .reader = reader };
+        pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+            return .{ .reader = capnp_reader };
         }
 
-        pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-            return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+        pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+            return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
         }
 
-        pub fn fromNull(context: capnp.ReadContext) @This() {
-            return @This().fromStructReader(capnp.StructReader.fromNull(context));
+        pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+            return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
         }
 
         /// For each of the target type and each of its parent scopes, a parameterization may be included
@@ -3270,12 +3270,12 @@ pub const Brand = struct {
     pub const Builder = struct {
         builder: capnp.StructBuilder,
 
-        pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-            return .{ .builder = builder };
+        pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+            return .{ .builder = capnp_builder };
         }
 
-        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
         /// For each of the target type and each of its parent scopes, a parameterization may be included
@@ -3325,16 +3325,16 @@ pub const Value = struct {
     pub const Reader = struct {
         reader: capnp.StructReader,
 
-        pub fn fromStructReader(reader: capnp.StructReader) @This() {
-            return .{ .reader = reader };
+        pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+            return .{ .reader = capnp_reader };
         }
 
-        pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-            return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+        pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+            return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
         }
 
-        pub fn fromNull(context: capnp.ReadContext) @This() {
-            return @This().fromStructReader(capnp.StructReader.fromNull(context));
+        pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+            return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
         }
 
         pub fn which(self: @This()) _Root.Value.Tag {
@@ -3484,12 +3484,12 @@ pub const Value = struct {
     pub const Builder = struct {
         builder: capnp.StructBuilder,
 
-        pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-            return .{ .builder = builder };
+        pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+            return .{ .builder = capnp_builder };
         }
 
-        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
         pub fn which(self: @This()) _Root.Value.Tag {
@@ -3727,16 +3727,16 @@ pub const Annotation = struct {
     pub const Reader = struct {
         reader: capnp.StructReader,
 
-        pub fn fromStructReader(reader: capnp.StructReader) @This() {
-            return .{ .reader = reader };
+        pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+            return .{ .reader = capnp_reader };
         }
 
-        pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-            return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+        pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+            return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
         }
 
-        pub fn fromNull(context: capnp.ReadContext) @This() {
-            return @This().fromStructReader(capnp.StructReader.fromNull(context));
+        pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+            return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
         }
 
         /// ID of the annotation node.
@@ -3763,12 +3763,12 @@ pub const Annotation = struct {
     pub const Builder = struct {
         builder: capnp.StructBuilder,
 
-        pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-            return .{ .builder = builder };
+        pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+            return .{ .builder = capnp_builder };
         }
 
-        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
         /// ID of the annotation node.
@@ -3819,16 +3819,16 @@ pub const CapnpVersion = struct {
     pub const Reader = struct {
         reader: capnp.StructReader,
 
-        pub fn fromStructReader(reader: capnp.StructReader) @This() {
-            return .{ .reader = reader };
+        pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+            return .{ .reader = capnp_reader };
         }
 
-        pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-            return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+        pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+            return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
         }
 
-        pub fn fromNull(context: capnp.ReadContext) @This() {
-            return @This().fromStructReader(capnp.StructReader.fromNull(context));
+        pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+            return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
         }
 
         pub fn major(self: @This()) u16 {
@@ -3851,12 +3851,12 @@ pub const CapnpVersion = struct {
     pub const Builder = struct {
         builder: capnp.StructBuilder,
 
-        pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-            return .{ .builder = builder };
+        pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+            return .{ .builder = capnp_builder };
         }
 
-        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
         pub fn major(self: @This()) u16 {
@@ -3903,16 +3903,16 @@ pub const CodeGeneratorRequest = struct {
             pub const Reader = struct {
                 reader: capnp.StructReader,
 
-                pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                    return .{ .reader = reader };
+                pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                    return .{ .reader = capnp_reader };
                 }
 
-                pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+                pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
                 }
 
-                pub fn fromNull(context: capnp.ReadContext) @This() {
-                    return @This().fromStructReader(capnp.StructReader.fromNull(context));
+                pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                    return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
                 }
 
                 /// ID of the imported file.
@@ -3938,12 +3938,12 @@ pub const CodeGeneratorRequest = struct {
             pub const Builder = struct {
                 builder: capnp.StructBuilder,
 
-                pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                    return .{ .builder = builder };
+                pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                    return .{ .builder = capnp_builder };
                 }
 
-                pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                    return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+                pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
                 }
 
                 /// ID of the imported file.
@@ -3998,16 +3998,16 @@ pub const CodeGeneratorRequest = struct {
                     pub const Reader = struct {
                         reader: capnp.StructReader,
 
-                        pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                            return .{ .reader = reader };
+                        pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                            return .{ .reader = capnp_reader };
                         }
 
-                        pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                            return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+                        pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                            return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
                         }
 
-                        pub fn fromNull(context: capnp.ReadContext) @This() {
-                            return @This().fromStructReader(capnp.StructReader.fromNull(context));
+                        pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                            return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
                         }
 
                         pub fn parentTypeId(self: @This()) u64 {
@@ -4026,12 +4026,12 @@ pub const CodeGeneratorRequest = struct {
                     pub const Builder = struct {
                         builder: capnp.StructBuilder,
 
-                        pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                            return .{ .builder = builder };
+                        pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                            return .{ .builder = capnp_builder };
                         }
 
-                        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+                        pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                            return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
                         }
 
                         pub fn parentTypeId(self: @This()) u64 {
@@ -4061,16 +4061,16 @@ pub const CodeGeneratorRequest = struct {
                 pub const Reader = struct {
                     reader: capnp.StructReader,
 
-                    pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                        return .{ .reader = reader };
+                    pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                        return .{ .reader = capnp_reader };
                     }
 
-                    pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                        return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+                    pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                        return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
                     }
 
-                    pub fn fromNull(context: capnp.ReadContext) @This() {
-                        return @This().fromStructReader(capnp.StructReader.fromNull(context));
+                    pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                        return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
                     }
 
                     pub fn which(self: @This()) _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Tag {
@@ -4109,12 +4109,12 @@ pub const CodeGeneratorRequest = struct {
                 pub const Builder = struct {
                     builder: capnp.StructBuilder,
 
-                    pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                        return .{ .builder = builder };
+                    pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                        return .{ .builder = capnp_builder };
                     }
 
-                    pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                        return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+                    pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                        return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
                     }
 
                     pub fn which(self: @This()) _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Tag {
@@ -4174,16 +4174,16 @@ pub const CodeGeneratorRequest = struct {
             pub const Reader = struct {
                 reader: capnp.StructReader,
 
-                pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                    return .{ .reader = reader };
+                pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                    return .{ .reader = capnp_reader };
                 }
 
-                pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+                pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
                 }
 
-                pub fn fromNull(context: capnp.ReadContext) @This() {
-                    return @This().fromStructReader(capnp.StructReader.fromNull(context));
+                pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                    return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
                 }
 
                 pub fn identifiers(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Reader, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.reader_trait) {
@@ -4198,12 +4198,12 @@ pub const CodeGeneratorRequest = struct {
             pub const Builder = struct {
                 builder: capnp.StructBuilder,
 
-                pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                    return .{ .builder = builder };
+                pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                    return .{ .builder = capnp_builder };
                 }
 
-                pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                    return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+                pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
                 }
 
                 pub fn identifiers(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.builder_trait) {
@@ -4221,16 +4221,16 @@ pub const CodeGeneratorRequest = struct {
         pub const Reader = struct {
             reader: capnp.StructReader,
 
-            pub fn fromStructReader(reader: capnp.StructReader) @This() {
-                return .{ .reader = reader };
+            pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                return .{ .reader = capnp_reader };
             }
 
-            pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-                return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+            pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
             }
 
-            pub fn fromNull(context: capnp.ReadContext) @This() {
-                return @This().fromStructReader(capnp.StructReader.fromNull(context));
+            pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
             /// ID of the file.
@@ -4261,12 +4261,12 @@ pub const CodeGeneratorRequest = struct {
         pub const Builder = struct {
             builder: capnp.StructBuilder,
 
-            pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-                return .{ .builder = builder };
+            pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                return .{ .builder = capnp_builder };
             }
 
-            pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-                return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+            pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
             /// ID of the file.
@@ -4308,16 +4308,16 @@ pub const CodeGeneratorRequest = struct {
     pub const Reader = struct {
         reader: capnp.StructReader,
 
-        pub fn fromStructReader(reader: capnp.StructReader) @This() {
-            return .{ .reader = reader };
+        pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+            return .{ .reader = capnp_reader };
         }
 
-        pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {
-            return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));
+        pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+            return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
         }
 
-        pub fn fromNull(context: capnp.ReadContext) @This() {
-            return @This().fromStructReader(capnp.StructReader.fromNull(context));
+        pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+            return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
         }
 
         /// All nodes parsed by the compiler, including for the files on the command line and their
@@ -4355,12 +4355,12 @@ pub const CodeGeneratorRequest = struct {
     pub const Builder = struct {
         builder: capnp.StructBuilder,
 
-        pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {
-            return .{ .builder = builder };
+        pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+            return .{ .builder = capnp_builder };
         }
 
-        pub fn fromBuildContext(context: capnp.BuildContext) @This() {
-            return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };
+        pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+            return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
         /// All nodes parsed by the compiler, including for the files on the command line and their

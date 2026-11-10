@@ -1121,28 +1121,28 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writer.writeAll("reader: capnp.StructReader,\n\n");
 
                     try ctx.writeIndent();
-                    try ctx.writer.writeAll("pub fn fromStructReader(reader: capnp.StructReader) @This() {\n");
+                    try ctx.writer.writeAll("pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {\n");
                     ctx.indenter.inc();
                     try ctx.writeIndent();
-                    try ctx.writer.writeAll("return .{ .reader = reader };\n");
+                    try ctx.writer.writeAll("return .{ .reader = capnp_reader };\n");
                     ctx.indenter.dec();
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("}\n\n");
 
                     try ctx.writeIndent();
-                    try ctx.writer.writeAll("pub fn fromReadContext(context: capnp.ReadContext) capnp.Error!@This() {\n");
+                    try ctx.writer.writeAll("pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {\n");
                     ctx.indenter.inc();
                     try ctx.writeIndent();
-                    try ctx.writer.writeAll("return @This().fromStructReader(try capnp.StructReader.fromReadContext(context));\n");
+                    try ctx.writer.writeAll("return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));\n");
                     ctx.indenter.dec();
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("}\n\n");
 
                     try ctx.writeIndent();
-                    try ctx.writer.writeAll("pub fn fromNull(context: capnp.ReadContext) @This() {\n");
+                    try ctx.writer.writeAll("pub fn fromNull(capnp_context: capnp.ReadContext) @This() {\n");
                     ctx.indenter.inc();
                     try ctx.writeIndent();
-                    try ctx.writer.writeAll("return @This().fromStructReader(capnp.StructReader.fromNull(context));\n");
+                    try ctx.writer.writeAll("return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));\n");
                     ctx.indenter.dec();
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("}\n\n");
@@ -1194,19 +1194,19 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writer.writeAll("builder: capnp.StructBuilder,\n\n");
 
                     try ctx.writeIndent();
-                    try ctx.writer.writeAll("pub fn fromStructBuilder(builder: capnp.StructBuilder) @This() {\n");
+                    try ctx.writer.writeAll("pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {\n");
                     ctx.indenter.inc();
                     try ctx.writeIndent();
-                    try ctx.writer.writeAll("return .{ .builder = builder };\n");
+                    try ctx.writer.writeAll("return .{ .builder = capnp_builder };\n");
                     ctx.indenter.dec();
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("}\n\n");
 
                     try ctx.writeIndent();
-                    try ctx.writer.writeAll("pub fn fromBuildContext(context: capnp.BuildContext) @This() {\n");
+                    try ctx.writer.writeAll("pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {\n");
                     ctx.indenter.inc();
                     try ctx.writeIndent();
-                    try ctx.writer.writeAll("return .{ .builder = capnp.StructBuilder.fromBuildContext(context) };\n");
+                    try ctx.writer.writeAll("return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };\n");
                     ctx.indenter.dec();
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("}\n\n");
