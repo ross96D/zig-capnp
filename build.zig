@@ -230,7 +230,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
-            .root_source_file = b.path("examples/in-process-rpc-pipeline/main.zig"),
+            .root_source_file = b.path("examples/rpc-pipeline/main_in_process.zig"),
             .imports = &.{
                 .{ .name = "capnp", .module = capnp_mod },
                 .{ .name = "capnp_rpc", .module = capnp_rpc_mod },
@@ -238,12 +238,48 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    const example_rpc_pipeline_client = b.addExecutable(.{
+        .name = "example-rpc-pipeline-client",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("examples/rpc-pipeline/main_client.zig"),
+            .imports = &.{
+                .{ .name = "capnp", .module = capnp_mod },
+                .{ .name = "capnp_rpc", .module = capnp_rpc_mod },
+            },
+        }),
+    });
+
+    const run_example_rpc_pipeline_client = b.addRunArtifact(example_rpc_pipeline_client);
+    const run_rpc_pipeline_client_step = b.step("run-example-rpc-client", "Run the RPC pipeline client");
+    run_rpc_pipeline_client_step.dependOn(&run_example_rpc_pipeline_client.step);
+
+    const example_rpc_pipeline_server = b.addExecutable(.{
+        .name = "example-rpc-pipeline-server",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("examples/rpc-pipeline/main_server.zig"),
+            .imports = &.{
+                .{ .name = "capnp", .module = capnp_mod },
+                .{ .name = "capnp_rpc", .module = capnp_rpc_mod },
+            },
+        }),
+    });
+
+    const run_example_rpc_pipeline_server = b.addRunArtifact(example_rpc_pipeline_server);
+    const run_rpc_pipeline_server_step = b.step("run-example-rpc-server", "Run the RPC pipeline server");
+    run_rpc_pipeline_server_step.dependOn(&run_example_rpc_pipeline_server.step);
+
     const examples_step = b.step("examples", "Build the example programs");
     examples_step.dependOn(&example_build_message.step);
     examples_step.dependOn(&example_packed_message.step);
     examples_step.dependOn(&example_lists.step);
     examples_step.dependOn(&example_rpc.step);
     examples_step.dependOn(&example_rpc_pipeline.step);
+    examples_step.dependOn(&example_rpc_pipeline_client.step);
+    examples_step.dependOn(&example_rpc_pipeline_server.step);
 
     const run_example_build_message = b.addRunArtifact(example_build_message);
     const run_build_message_step = b.step("run-example-build-message", "Run the build-message example");

@@ -179,6 +179,10 @@ pub const Listener = struct {
         return Stream.init(self.allocator, socket, self.options);
     }
 
+    pub fn fd(self: *const Listener) std.posix.fd_t {
+        return self.socket.fd;
+    }
+
     pub fn deinit(self: *Listener) void {
         self.socket.close();
         if (self.unlink_on_deinit) io.unlink(self.path);

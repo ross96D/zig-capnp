@@ -21,7 +21,7 @@ const EchoServer = struct {
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
-    var loopback = capnp_rpc.Loopback.init(allocator);
+    var loopback = capnp_rpc.transports.Loopback.init(allocator);
     defer loopback.deinit();
 
     var server_connection = try capnp_rpc.Connection.init(allocator, loopback.endpoint(.server));
