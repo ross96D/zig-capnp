@@ -20,18 +20,44 @@ pub const Transport = struct {
     vtable: *const VTable,
 
     pub const VTable = struct {
+        /// Non-blocking. Copy bytes into the transport's write queue and
+        /// write whatever the peer accepts immediately.
         send: *const fn (context: *anyopaque, side: Side, bytes: []const u8) anyerror!void,
+        /// Non-blocking. Return one complete message, or null if no complete
+        /// message is currently buffered.
         receive: *const fn (context: *anyopaque, side: Side, allocator: std.mem.Allocator) anyerror!?[]u8,
+        /// Non-blocking. Continue writing buffered outbound bytes.
+        flush: *const fn (context: *anyopaque, side: Side) anyerror!void,
+        /// File descriptor to poll, or -1 for in-memory transports.
+        fd: *const fn (context: *anyopaque, side: Side) std.posix.fd_t,
+        /// True while send() has buffered bytes waiting for writability.
+        wantsWrite: *const fn (context: *anyopaque, side: Side) bool,
+        /// True after EOF or a fatal transport error.
+        isClosed: *const fn (context: *anyopaque, side: Side) bool,
     };
 
     pub fn send(self: Transport, bytes: []const u8) anyerror!void {
-        // std.debug.print("send {} {}\n", .{ self.side, bytes.len });
         return self.vtable.send(self.context, self.side, bytes);
     }
 
     pub fn receive(self: Transport, allocator: std.mem.Allocator) anyerror!?[]u8 {
-        // std.debug.print("recieve {} \n", .{self.side});
         return self.vtable.receive(self.context, self.side, allocator);
+    }
+
+    pub fn flush(self: Transport) anyerror!void {
+        return self.vtable.flush(self.context, self.side);
+    }
+
+    pub fn fd(self: Transport) std.posix.fd_t {
+        return self.vtable.fd(self.context, self.side);
+    }
+
+    pub fn wantsWrite(self: Transport) bool {
+        return self.vtable.wantsWrite(self.context, self.side);
+    }
+
+    pub fn isClosed(self: Transport) bool {
+        return self.vtable.isClosed(self.context, self.side);
     }
 };
 
@@ -237,6 +263,18 @@ pub const Promise = struct {
         return response;
     }
 
+    /// Non-blocking completion check. The caller is responsible for driving
+    /// `Connection.step()` as transport events arrive.
+    pub fn tryTake(self: *Promise) !?Response {
+        if (self.finished) return error.AlreadyFinished;
+        const response = (try self.connection.takeReturn(self.question_id)) orelse return null;
+        var result = response;
+        errdefer result.deinit(self.connection.allocator);
+        try self.connection.sendFinish(self.question_id, true);
+        self.finished = true;
+        return result;
+    }
+
     /// Return a capability handle addressing the root result, or a pointer
     /// field within the result struct.
     pub fn capability(self: Promise, pointer_field: ?u16) !Capability {
@@ -246,6 +284,32 @@ pub const Promise = struct {
             .question_id = self.question_id,
             .pointer_field = pointer_field,
         } };
+    }
+};
+
+pub const BootstrapPromise = struct {
+    connection: *Connection,
+    question_id: u32,
+    finished: bool = false,
+
+    pub fn wait(self: *BootstrapPromise) !Capability {
+        if (self.finished) return error.AlreadyFinished;
+        var response = try self.connection.waitReturn(self.question_id);
+        defer response.deinit(self.connection.allocator);
+        const capability = try self.connection.finishBootstrap(&response, self.question_id);
+        self.finished = true;
+        return capability;
+    }
+
+    /// Non-blocking completion check. The caller is responsible for driving
+    /// `Connection.step()` as transport events arrive.
+    pub fn tryTake(self: *BootstrapPromise) !?Capability {
+        if (self.finished) return error.AlreadyFinished;
+        var response = (try self.connection.takeReturn(self.question_id)) orelse return null;
+        defer response.deinit(self.connection.allocator);
+        const capability = try self.connection.finishBootstrap(&response, self.question_id);
+        self.finished = true;
+        return capability;
     }
 };
 
@@ -318,14 +382,41 @@ pub const Connection = struct {
         self.disembargo_callback = callback;
     }
 
-    pub fn pump(self: *Connection) !void {
+    /// Process all currently available messages and flush buffered output.
+    /// This never waits for the transport.
+    pub fn step(self: *Connection) !void {
         while (try self.transport.receive(self.allocator)) |bytes| {
             defer self.allocator.free(bytes);
             try self.handle(bytes);
         }
+        try self.transport.flush();
     }
 
-    pub fn bootstrap(self: *Connection) !Capability {
+    /// Kept as a non-blocking alias for `step`.
+    pub fn pump(self: *Connection) !void {
+        return self.step();
+    }
+
+    fn waitForProgress(self: *Connection) !void {
+        if (self.transport.fd() < 0) {
+            if (self.peer) |peer| try peer.step();
+            try self.step();
+            return;
+        }
+
+        var events: i16 = std.posix.POLL.IN;
+        if (self.transport.wantsWrite()) events |= std.posix.POLL.OUT;
+
+        var fds = [1]std.posix.pollfd{.{
+            .fd = self.transport.fd(),
+            .events = events,
+            .revents = 0,
+        }};
+        _ = try std.posix.poll(&fds, -1);
+        try self.step();
+    }
+
+    pub fn bootstrapStart(self: *Connection) !BootstrapPromise {
         const question_id = self.allocQuestionId();
 
         var message = capnp.MessageBuilder{ .allocator = self.allocator };
@@ -340,9 +431,19 @@ pub const Connection = struct {
         defer self.allocator.free(bytes);
 
         try self.sendRaw(bytes);
-        var response = try self.waitReturn(question_id);
-        defer response.deinit(self.allocator);
+        return .{ .connection = self, .question_id = question_id };
+    }
 
+    pub fn bootstrap(self: *Connection) !Capability {
+        var promise = try self.bootstrapStart();
+        return promise.wait();
+    }
+
+    fn finishBootstrap(
+        self: *Connection,
+        response: *Response,
+        question_id: u32,
+    ) !Capability {
         switch (try response.which()) {
             .results => {
                 const payload = try response.payload();
@@ -491,13 +592,22 @@ pub const Connection = struct {
 
     fn sendRaw(self: *Connection, bytes: []const u8) anyerror!void {
         try self.transport.send(bytes);
-        if (self.peer) |peer| try peer.pump();
+        if (self.peer) |peer| try peer.step();
     }
 
     fn waitReturn(self: *Connection, question_id: u32) !Response {
-        if (try self.takeReturn(question_id)) |response| return response;
-        try self.pump();
-        return (try self.takeReturn(question_id)) orelse error.NoResponse;
+        while (true) {
+            if (try self.takeReturn(question_id)) |response| return response;
+
+            if (self.transport.isClosed()) {
+                // Drain anything that was already buffered before the close.
+                try self.step();
+                if (try self.takeReturn(question_id)) |response| return response;
+                return error.EndOfStream;
+            }
+
+            try self.waitForProgress();
+        }
     }
 
     fn takeReturn(self: *Connection, question_id: u32) !?Response {

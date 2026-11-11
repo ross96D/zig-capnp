@@ -11,6 +11,10 @@ pub const Loopback = struct {
     const vtable = Transport.VTable{
         .send = send,
         .receive = receive,
+        .flush = flush,
+        .fd = fd,
+        .wantsWrite = wantsWrite,
+        .isClosed = isClosed,
     };
 
     pub fn init(allocator: std.mem.Allocator) Loopback {
@@ -43,5 +47,28 @@ pub const Loopback = struct {
         const idx = @backingInt(side);
         if (self.queues[idx].items.len == 0) return null;
         return self.queues[idx].orderedRemove(0);
+    }
+
+    fn flush(context: *anyopaque, side: Side) anyerror!void {
+        _ = context;
+        _ = side;
+    }
+
+    fn fd(context: *anyopaque, side: Side) std.posix.fd_t {
+        _ = context;
+        _ = side;
+        return -1;
+    }
+
+    fn wantsWrite(context: *anyopaque, side: Side) bool {
+        _ = context;
+        _ = side;
+        return false;
+    }
+
+    fn isClosed(context: *anyopaque, side: Side) bool {
+        _ = context;
+        _ = side;
+        return false;
     }
 };
