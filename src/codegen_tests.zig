@@ -317,7 +317,7 @@ const TypedCalculator = struct {
 };
 
 test "generated typed interface client and server" {
-    var loopback = capnp_rpc.Loopback.init(std.testing.allocator);
+    var loopback = capnp_rpc.transports.Loopback.init(std.testing.allocator);
     defer loopback.deinit();
 
     var server_connection = try capnp_rpc.Connection.init(std.testing.allocator, loopback.endpoint(.server));

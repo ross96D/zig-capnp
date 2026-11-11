@@ -91,7 +91,7 @@ test "generated RPC protocol bindings compile" {
 }
 
 test "level 0 bootstrap, call, return, and finish" {
-    var loopback = connection.Loopback.init(testing.allocator);
+    var loopback = connection.transports.Loopback.init(testing.allocator);
     defer loopback.deinit();
 
     var server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
@@ -126,7 +126,7 @@ test "level 0 bootstrap, call, return, and finish" {
 }
 
 test "level 0 remote exception is returned" {
-    var loopback = connection.Loopback.init(testing.allocator);
+    var loopback = connection.transports.Loopback.init(testing.allocator);
     defer loopback.deinit();
 
     var server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
@@ -158,7 +158,7 @@ test "level 0 remote exception is returned" {
 }
 
 test "level 1 returned capability and release" {
-    var loopback = connection.Loopback.init(testing.allocator);
+    var loopback = connection.transports.Loopback.init(testing.allocator);
     defer loopback.deinit();
 
     var server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
@@ -210,7 +210,7 @@ test "level 1 returned capability and release" {
 }
 
 test "level 1 params capability" {
-    var loopback = connection.Loopback.init(testing.allocator);
+    var loopback = connection.transports.Loopback.init(testing.allocator);
     defer loopback.deinit();
 
     var server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
@@ -255,7 +255,7 @@ test "level 1 params capability" {
 }
 
 test "promise pipelining against a returned capability" {
-    var loopback = connection.Loopback.init(testing.allocator);
+    var loopback = connection.transports.Loopback.init(testing.allocator);
     defer loopback.deinit();
 
     var server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
@@ -300,7 +300,7 @@ test "promise pipelining against a returned capability" {
 }
 
 test "promise export queues calls until resolved" {
-    var loopback = connection.Loopback.init(testing.allocator);
+    var loopback = connection.transports.Loopback.init(testing.allocator);
     defer loopback.deinit();
 
     var server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
@@ -348,7 +348,7 @@ test "promise export queues calls until resolved" {
 }
 
 test "disembargo loopback echo" {
-    var loopback = connection.Loopback.init(testing.allocator);
+    var loopback = connection.transports.Loopback.init(testing.allocator);
     defer loopback.deinit();
 
     var server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
@@ -380,7 +380,7 @@ test "disembargo loopback echo" {
 }
 
 test "receiverAnswer descriptor resolves against the answer table" {
-    var loopback = connection.Loopback.init(testing.allocator);
+    var loopback = connection.transports.Loopback.init(testing.allocator);
     defer loopback.deinit();
 
     var server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));

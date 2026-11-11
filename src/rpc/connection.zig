@@ -10,6 +10,8 @@ const std = @import("std");
 const capnp = @import("capnp");
 const rpc = @import("rpc.zig");
 
+pub const transports = @import("transports/mod.zig");
+
 pub const Side = enum(u8) { client = 0, server = 1 };
 
 pub const Transport = struct {
@@ -23,54 +25,13 @@ pub const Transport = struct {
     };
 
     pub fn send(self: Transport, bytes: []const u8) anyerror!void {
+        // std.debug.print("send {} {}\n", .{ self.side, bytes.len });
         return self.vtable.send(self.context, self.side, bytes);
     }
 
     pub fn receive(self: Transport, allocator: std.mem.Allocator) anyerror!?[]u8 {
+        // std.debug.print("recieve {} \n", .{self.side});
         return self.vtable.receive(self.context, self.side, allocator);
-    }
-};
-
-/// In-memory duplex transport used by tests and local RPC.
-pub const Loopback = struct {
-    allocator: std.mem.Allocator,
-    queues: [2]std.ArrayList([]u8) = .{ .empty, .empty },
-
-    const vtable = Transport.VTable{
-        .send = send,
-        .receive = receive,
-    };
-
-    pub fn init(allocator: std.mem.Allocator) Loopback {
-        return .{ .allocator = allocator };
-    }
-
-    pub fn deinit(self: *Loopback) void {
-        for (&self.queues) |*queue| {
-            for (queue.items) |bytes| self.allocator.free(bytes);
-            queue.deinit(self.allocator);
-        }
-    }
-
-    pub fn endpoint(self: *Loopback, side: Side) Transport {
-        return .{ .context = self, .side = side, .vtable = &vtable };
-    }
-
-    fn send(context: *anyopaque, side: Side, bytes: []const u8) anyerror!void {
-        const self: *Loopback = @ptrCast(@alignCast(context));
-        const copy = try self.allocator.dupe(u8, bytes);
-        errdefer self.allocator.free(copy);
-
-        const peer: usize = 1 - @backingInt(side);
-        try self.queues[peer].append(self.allocator, copy);
-    }
-
-    fn receive(context: *anyopaque, side: Side, allocator: std.mem.Allocator) anyerror!?[]u8 {
-        _ = allocator;
-        const self: *Loopback = @ptrCast(@alignCast(context));
-        const idx = @backingInt(side);
-        if (self.queues[idx].items.len == 0) return null;
-        return self.queues[idx].orderedRemove(0);
     }
 };
 

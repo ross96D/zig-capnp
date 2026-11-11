@@ -22,6 +22,15 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/capnp.zig"),
     });
 
+    const point_example_mod = b.addModule("point", .{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("examples/common/generated/point.zig"),
+        .imports = &.{
+            .{ .name = "capnp", .module = capnp_mod },
+        },
+    });
+
     const capnp_rpc_mod = b.addModule("capnp_rpc", .{
         .target = target,
         .optimize = optimize,
@@ -163,6 +172,98 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_rpc_tests = b.addRunArtifact(rpc_tests);
+
+    const example_build_message = b.addExecutable(.{
+        .name = "example-build-message",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("examples/build-message/main.zig"),
+            .imports = &.{
+                .{ .name = "capnp", .module = capnp_mod },
+                .{ .name = "point", .module = point_example_mod },
+            },
+        }),
+    });
+
+    const example_packed_message = b.addExecutable(.{
+        .name = "example-packed-message",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("examples/packed-message/main.zig"),
+            .imports = &.{
+                .{ .name = "capnp", .module = capnp_mod },
+                .{ .name = "point", .module = point_example_mod },
+            },
+        }),
+    });
+
+    const example_lists = b.addExecutable(.{
+        .name = "example-point-list",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("examples/point-list/main.zig"),
+            .imports = &.{
+                .{ .name = "capnp", .module = capnp_mod },
+                .{ .name = "point", .module = point_example_mod },
+            },
+        }),
+    });
+
+    const example_rpc = b.addExecutable(.{
+        .name = "example-rpc-echo",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("examples/in-process-rpc-echo/main.zig"),
+            .imports = &.{
+                .{ .name = "capnp", .module = capnp_mod },
+                .{ .name = "capnp_rpc", .module = capnp_rpc_mod },
+            },
+        }),
+    });
+
+    const example_rpc_pipeline = b.addExecutable(.{
+        .name = "example-rpc-pipeline",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("examples/in-process-rpc-pipeline/main.zig"),
+            .imports = &.{
+                .{ .name = "capnp", .module = capnp_mod },
+                .{ .name = "capnp_rpc", .module = capnp_rpc_mod },
+            },
+        }),
+    });
+
+    const examples_step = b.step("examples", "Build the example programs");
+    examples_step.dependOn(&example_build_message.step);
+    examples_step.dependOn(&example_packed_message.step);
+    examples_step.dependOn(&example_lists.step);
+    examples_step.dependOn(&example_rpc.step);
+    examples_step.dependOn(&example_rpc_pipeline.step);
+
+    const run_example_build_message = b.addRunArtifact(example_build_message);
+    const run_build_message_step = b.step("run-example-build-message", "Run the build-message example");
+    run_build_message_step.dependOn(&run_example_build_message.step);
+
+    const run_example_packed_message = b.addRunArtifact(example_packed_message);
+    const run_packed_message_step = b.step("run-example-packed-message", "Run the packed-message example");
+    run_packed_message_step.dependOn(&run_example_packed_message.step);
+
+    const run_example_lists = b.addRunArtifact(example_lists);
+    const run_lists_step = b.step("run-example-point-list", "Run the point-list example");
+    run_lists_step.dependOn(&run_example_lists.step);
+
+    const run_example_rpc = b.addRunArtifact(example_rpc);
+    const run_rpc_step = b.step("run-example-rpc-echo", "Run the RPC echo example");
+    run_rpc_step.dependOn(&run_example_rpc.step);
+
+    const run_example_rpc_pipeline = b.addRunArtifact(example_rpc_pipeline);
+    const run_rpc_pipeline_step = b.step("run-example-rpc-pipeline", "Run the RPC pipeline example");
+    run_rpc_pipeline_step.dependOn(&run_example_rpc_pipeline.step);
 
     // This creates a build step. It will be visible in the `zig build --help` menu,
     // and can be selected like this: `zig build test`
