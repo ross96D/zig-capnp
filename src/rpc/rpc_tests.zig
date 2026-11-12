@@ -1718,3 +1718,38 @@ test "promise deinit releases a local response" {
 
     try testing.expectEqual(@as(usize, 1), destroyed.count);
 }
+
+test "lifecycle deinit is idempotent" {
+    var loopback = transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    const conn = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer conn.deinit();
+
+    const provider = try conn.initLocal(.{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    });
+    defer provider.release();
+
+    var request = try conn.beginCall(provider, EchoInterface.id, 0);
+    var params = try request.params();
+    try params.content().setText("idempotent");
+    var response = try request.send();
+    response.deinit();
+    response.deinit();
+    request.deinit();
+    request.deinit();
+
+    var unsent = try conn.beginCall(provider, EchoInterface.id, 0);
+    unsent.deinit();
+    unsent.deinit();
+
+    var pending_request = try conn.beginCall(provider, EchoInterface.id, 0);
+    var promise = try pending_request.start();
+    promise.deinit();
+    promise.deinit();
+    pending_request.deinit();
+    pending_request.deinit();
+}

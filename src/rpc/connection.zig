@@ -142,6 +142,11 @@ const PendingCall = struct {
     bytes: []u8,
 };
 
+const ExportKind = enum {
+    hosted,
+    promise,
+};
+
 const ExportEntry = struct {
     connection: *Connection,
     export_id: u32,
@@ -150,8 +155,13 @@ const ExportEntry = struct {
     wire_refs: u32,
     /// Number of live `Capability.promised` handles.
     handle_refs: u32 = 0,
-    is_promise: bool = false,
+    kind: ExportKind = .hosted,
     pending_calls: std.ArrayList(PendingCall) = .empty,
+};
+
+const FinishState = enum {
+    not_sent,
+    sent,
 };
 
 const QuestionRef = struct {
@@ -159,7 +169,7 @@ const QuestionRef = struct {
     id: u32,
     refs: u32,
     caps_taken: bool = false,
-    finish_sent: bool = false,
+    finish_state: FinishState = .not_sent,
     /// Export ids created while encoding this question's params. Used to
     /// apply `Return.releaseParamCaps`.
     param_export_ids: std.ArrayList(u32) = .empty,
@@ -185,12 +195,18 @@ const AnswerCapability = struct {
     refs: u32,
 };
 
+const AnswerCallState = enum {
+    /// A placeholder created so pipelined calls have somewhere to attach.
+    reserved,
+    /// The original Call has been received (dispatching or queued).
+    received,
+};
+
 const AnswerState = struct {
     resolved_bytes: ?[]u8 = null,
-    /// True once the original Call for this question has been received and is
-    /// either dispatching or queued behind a promise. Placeholder entries
-    /// created for pipelining have this false.
-    call_received: bool = false,
+    /// Tracks whether the original Call for this question has been received.
+    /// Placeholder entries created for pipelining remain `.reserved`.
+    call_state: AnswerCallState = .reserved,
     pending: std.ArrayList(PendingCall) = .empty,
     /// Export ids created while encoding this answer's cap table.
     export_ids: std.ArrayList(u32) = .empty,
@@ -252,18 +268,33 @@ fn isNone(capability: Capability) bool {
     };
 }
 
-pub const Response = struct {
-    message: capnp.Message,
-    connection: *Connection,
-    allocator: std.mem.Allocator,
+pub const ResponseWireState = struct {
     question: ?*QuestionRef = null,
     caps_taken: bool = false,
     /// One flag per result cap-table entry, set when the entry has been
     /// decoded. Used to release result capabilities the caller did not take.
     taken_caps: ?[]bool = null,
+};
+
+pub const ResponseLocalState = struct {
     /// Owned capabilities for in-process (local) calls, indexed like the cap
     /// table. Released by `deinit`.
-    local_caps: ?[]Capability = null,
+    caps: []Capability,
+};
+
+pub const ResponseState = union(enum) {
+    /// A Return message received over the wire.
+    wire: ResponseWireState,
+    /// A Response synthesized by an in-process call.
+    local: ResponseLocalState,
+    deinitialized: void,
+};
+
+pub const Response = struct {
+    message: capnp.Message,
+    connection: *Connection,
+    allocator: std.mem.Allocator,
+    state: ResponseState,
 
     pub fn fromBytes(bytes: []const u8, connection: *Connection) !Response {
         const message = try capnp.Message.fromBytes(bytes, connection.allocator);
@@ -271,44 +302,65 @@ pub const Response = struct {
             .message = message,
             .connection = connection,
             .allocator = connection.allocator,
+            .state = .{ .wire = .{} },
         };
     }
 
     pub fn deinit(self: *Response) void {
         const allocator = self.allocator;
-        if (self.taken_caps != null) self.releaseUntakenCaps();
+        switch (self.state) {
+            .deinitialized => return,
+            .wire => |*wire| {
+                if (wire.taken_caps != null) self.releaseUntakenCaps();
+                if (wire.taken_caps) |flags| {
+                    allocator.free(flags);
+                    wire.taken_caps = null;
+                }
+                if (wire.question) |question| {
+                    question.caps_taken = question.caps_taken or wire.caps_taken;
+                    wire.question = null;
+                    question.release();
+                }
+            },
+            .local => |*local| {
+                for (local.caps) |handle| handle.release();
+                allocator.free(local.caps);
+            },
+        }
         self.message.deinit(allocator);
-        if (self.taken_caps) |flags| {
-            allocator.free(flags);
-            self.taken_caps = null;
-        }
-        if (self.local_caps) |caps| {
-            for (caps) |handle| handle.release();
-            allocator.free(caps);
-            self.local_caps = null;
-        }
-        if (self.question) |question| {
-            question.caps_taken = question.caps_taken or self.caps_taken;
-            self.question = null;
-            question.release();
+        self.state = .deinitialized;
+    }
+
+    fn attachQuestion(self: *Response, question: *QuestionRef) void {
+        switch (self.state) {
+            .wire => |*wire| wire.question = question,
+            .local, .deinitialized => unreachable,
         }
     }
 
     fn markTaken(self: *Response, cap_count: u29, index: u32) !void {
-        if (self.taken_caps == null) {
+        const wire = switch (self.state) {
+            .wire => |*wire| wire,
+            .local, .deinitialized => unreachable,
+        };
+        if (wire.taken_caps == null) {
             const flags = try self.allocator.alloc(bool, @intCast(cap_count));
             @memset(flags, false);
-            self.taken_caps = flags;
+            wire.taken_caps = flags;
         }
-        self.taken_caps.?[index] = true;
+        wire.taken_caps.?[index] = true;
     }
 
     /// Finish was sent with `releaseResultCaps = false` because at least one
     /// result capability was taken. Release the exports that were not taken.
     fn releaseUntakenCaps(self: *Response) void {
+        const wire = switch (self.state) {
+            .wire => |*wire| wire,
+            .local, .deinitialized => return,
+        };
         const result_payload = self.payload() catch return;
         const cap_table = result_payload.capTable() catch return;
-        const flags = self.taken_caps.?;
+        const flags = wire.taken_caps.?;
         for (0..cap_table.length) |i| {
             if (i < flags.len and flags[i]) continue;
             const descriptor = cap_table.get(@intCast(i));
@@ -321,6 +373,7 @@ pub const Response = struct {
     }
 
     pub fn returnReader(self: *Response) !rpc.Return.Reader {
+        if (self.state == .deinitialized) return error.InvalidResponse;
         const root = try self.message.getRootStruct(rpc.Message.Reader, rpc.Message.reader_trait);
         return (try root.@"return"()) orelse error.InvalidReturn;
     }
@@ -343,26 +396,31 @@ pub const Response = struct {
     /// Decode a capability from the result cap table. The returned handle owns
     /// one reference and must be released by the caller.
     pub fn capability(self: *Response, index: u32) !Capability {
-        if (self.local_caps) |caps| {
-            if (index >= caps.len) return error.InvalidCapability;
-            return caps[index].retain();
+        switch (self.state) {
+            .deinitialized => return error.InvalidResponse,
+            .local => |local| {
+                if (index >= local.caps.len) return error.InvalidCapability;
+                return local.caps[index].retain();
+            },
+            .wire => |*wire| {
+                const result_payload = try self.payload();
+                const cap_table = try result_payload.capTable();
+                if (index >= cap_table.length) return error.InvalidCapability;
+                if (wire.taken_caps) |flags| {
+                    if (index < flags.len and flags[index]) return error.CapabilityAlreadyTaken;
+                }
+                const handle = try self.connection.decodeCapability(cap_table.get(index));
+                if (!isNone(handle)) {
+                    self.markTaken(cap_table.length, index) catch |err| {
+                        handle.release();
+                        return err;
+                    };
+                    wire.caps_taken = true;
+                    if (wire.question) |question| question.caps_taken = true;
+                }
+                return handle;
+            },
         }
-        const result_payload = try self.payload();
-        const cap_table = try result_payload.capTable();
-        if (index >= cap_table.length) return error.InvalidCapability;
-        if (self.taken_caps) |flags| {
-            if (index < flags.len and flags[index]) return error.CapabilityAlreadyTaken;
-        }
-        const handle = try self.connection.decodeCapability(cap_table.get(index));
-        if (!isNone(handle)) {
-            self.markTaken(cap_table.length, index) catch |err| {
-                handle.release();
-                return err;
-            };
-            self.caps_taken = true;
-            if (self.question) |question| question.caps_taken = true;
-        }
-        return handle;
     }
 
     pub fn exception(self: *Response) !?rpc.Exception.Reader {
@@ -371,28 +429,46 @@ pub const Response = struct {
     }
 };
 
-pub const Request = struct {
-    connection: *Connection,
+pub const RequestPending = struct {
     message: *capnp.MessageBuilder,
     call: rpc.Call.Builder,
     question_id: u32,
     question: ?*QuestionRef = null,
     caps: std.ArrayList(Capability) = .empty,
-    caps_deinitialized: bool = false,
-    sent: bool = false,
     params_builder: ?rpc.Payload.Builder = null,
     local_target: ?*LocalEntry = null,
     target: Capability = .none,
+};
 
-    pub fn params(self: *Request) !rpc.Payload.Builder {
-        if (self.sent) return error.AlreadySent;
+pub const RequestState = union(enum) {
+    pending: RequestPending,
+    started: void,
+    deinitialized: void,
+};
+
+pub const Request = struct {
+    connection: *Connection,
+    state: RequestState,
+
+    fn pendingState(self: *Request) !*RequestPending {
+        return switch (self.state) {
+            .pending => |*pending| pending,
+            .started, .deinitialized => error.AlreadySent,
+        };
+    }
+
+    fn pendingParams(_: *Request, pending: *RequestPending) !rpc.Payload.Builder {
         // Building the params field again would allocate a fresh Payload and
         // discard any content or cap table already written to it, so cache the
         // builder for the lifetime of the request.
-        if (self.params_builder) |payload| return payload;
-        const payload = try self.call.params();
-        self.params_builder = payload;
+        if (pending.params_builder) |payload| return payload;
+        const payload = try pending.call.params();
+        pending.params_builder = payload;
         return payload;
+    }
+
+    pub fn params(self: *Request) !rpc.Payload.Builder {
+        return self.pendingParams(try self.pendingState());
     }
 
     pub fn initParams(self: *Request, comptime T: type, comptime trait: capnp.BuilderTrait(T)) !T {
@@ -403,9 +479,9 @@ pub const Request = struct {
     /// Add a capability to the params cap table and return its index.
     /// The argument is borrowed; the request retains it until `deinit`.
     pub fn addCapability(self: *Request, capability: Capability) !u32 {
-        if (self.sent) return error.AlreadySent;
-        const index: u32 = @intCast(self.caps.items.len);
-        try self.caps.append(self.connection.allocator, capability.retain());
+        const pending = try self.pendingState();
+        const index: u32 = @intCast(pending.caps.items.len);
+        try pending.caps.append(self.connection.allocator, capability.retain());
         return index;
     }
 
@@ -416,34 +492,32 @@ pub const Request = struct {
         return self.addCapability(handle);
     }
 
-    fn deinitCaps(self: *Request) void {
-        if (self.caps_deinitialized) return;
-        for (self.caps.items) |capability| capability.release();
-        self.caps.deinit(self.connection.allocator);
-        self.caps_deinitialized = true;
+    fn deinitCaps(self: *Request, pending: *RequestPending) void {
+        for (pending.caps.items) |capability| capability.release();
+        pending.caps.deinit(self.connection.allocator);
     }
 
-    fn releaseTarget(self: *Request) void {
-        self.target.release();
-        self.target = .none;
+    fn releaseTarget(_: *Request, pending: *RequestPending) void {
+        pending.target.release();
+        pending.target = .none;
     }
 
-    fn discardQuestion(self: *Request) void {
-        if (self.question) |question| {
-            self.question = null;
+    fn discardQuestion(self: *Request, pending: *RequestPending) void {
+        if (pending.question) |question| {
+            pending.question = null;
             self.connection.destroyQuestion(question);
         }
     }
 
-    fn encodeCaps(self: *Request) !void {
-        if (self.caps.items.len == 0) return;
-        const payload = try self.params();
+    fn encodeCaps(self: *Request, pending: *RequestPending) !void {
+        if (pending.caps.items.len == 0) return;
+        const payload = try self.pendingParams(pending);
         var cap_table = try payload.capTable();
-        try cap_table.init(@intCast(self.caps.items.len));
-        for (self.caps.items, 0..) |capability, i| {
+        try cap_table.init(@intCast(pending.caps.items.len));
+        for (pending.caps.items, 0..) |capability, i| {
             const export_id = try self.connection.encodeCapability(capability, cap_table.get(@intCast(i)));
             if (export_id) |id| {
-                if (self.question) |question| {
+                if (pending.question) |question| {
                     try question.param_export_ids.append(self.connection.allocator, id);
                 }
             }
@@ -453,38 +527,36 @@ pub const Request = struct {
     /// Send the call without waiting for its Return. The returned Promise can
     /// be used to pipeline calls on the eventual result.
     pub fn start(self: *Request) !Promise {
-        if (self.sent) return error.AlreadySent;
-        if (self.local_target) |local| return self.startLocal(local);
+        const pending = try self.pendingState();
+        if (pending.local_target) |local| return self.startLocal(pending, local);
 
         const allocator = self.connection.allocator;
+        const question = pending.question orelse return error.MissingQuestion;
 
-        try self.encodeCaps();
+        try self.encodeCaps(pending);
 
-        const bytes = try self.message.toBytes(allocator);
+        const bytes = try pending.message.toBytes(allocator);
         defer allocator.free(bytes);
 
         try self.connection.sendRaw(bytes);
 
-        self.message.deinit();
-        allocator.destroy(self.message);
-        self.deinitCaps();
-        self.sent = true;
+        pending.message.deinit();
+        allocator.destroy(pending.message);
+        self.deinitCaps(pending);
+        self.releaseTarget(pending);
+        self.state = .started;
 
-        const question = self.question orelse return error.MissingQuestion;
-        self.question = null;
-        self.releaseTarget();
-
-        return .{ .connection = self.connection, .question = question };
+        return .{ .connection = self.connection, .state = .{ .question = question } };
     }
 
-    fn startLocal(self: *Request, local: *LocalEntry) !Promise {
+    fn startLocal(self: *Request, pending: *RequestPending, local: *LocalEntry) !Promise {
         const allocator = self.connection.allocator;
 
         // Local calls never go over the wire, so the params' capability
         // pointers should reference the request's handles directly rather than
         // being exported and then decoded as imports of ourselves.
 
-        const request_bytes = try self.message.toBytes(allocator);
+        const request_bytes = try pending.message.toBytes(allocator);
         defer allocator.free(request_bytes);
 
         var request_message = try capnp.Message.fromBytes(request_bytes, allocator);
@@ -502,25 +574,26 @@ pub const Request = struct {
         try self.connection.dispatchLocalCall(
             call,
             local.capability,
-            self.question_id,
+            pending.question_id,
             &return_bytes,
             &local_caps,
-            self.caps.items,
+            pending.caps.items,
         );
         const bytes = return_bytes.?;
         defer allocator.free(bytes);
 
         var response = try Response.fromBytes(bytes, self.connection);
-        response.local_caps = local_caps.toOwnedSlice(allocator) catch |err| {
+        const caps = local_caps.toOwnedSlice(allocator) catch |err| {
             response.deinit();
             return err;
         };
+        response.state = .{ .local = .{ .caps = caps } };
 
-        self.message.deinit();
-        allocator.destroy(self.message);
-        self.deinitCaps();
-        self.sent = true;
-        self.releaseTarget();
+        pending.message.deinit();
+        allocator.destroy(pending.message);
+        self.deinitCaps(pending);
+        self.releaseTarget(pending);
+        self.state = .started;
 
         if (self.connection.dispatch_depth == 0) {
             self.connection.drainDeferredCalls() catch |err| {
@@ -531,7 +604,7 @@ pub const Request = struct {
 
         return .{
             .connection = self.connection,
-            .local_response = response,
+            .state = .{ .local_response = response },
         };
     }
 
@@ -545,157 +618,178 @@ pub const Request = struct {
     }
 
     pub fn deinit(self: *Request) void {
-        self.deinitCaps();
-        self.releaseTarget();
-        self.discardQuestion();
-        if (self.sent) return;
-        self.message.deinit();
-        self.connection.allocator.destroy(self.message);
-        self.sent = true;
+        switch (self.state) {
+            .pending => |*pending| {
+                self.deinitCaps(pending);
+                self.releaseTarget(pending);
+                self.discardQuestion(pending);
+                pending.message.deinit();
+                self.connection.allocator.destroy(pending.message);
+                self.state = .deinitialized;
+            },
+            .started, .deinitialized => self.state = .deinitialized,
+        }
     }
+};
+
+pub const PromiseState = union(enum) {
+    question: *QuestionRef,
+    local_response: Response,
+    finished: void,
 };
 
 pub const Promise = struct {
     connection: *Connection,
-    question: ?*QuestionRef = null,
-    finished: bool = false,
-    local_response: ?Response = null,
+    state: PromiseState,
 
     /// Release this promise without waiting for its Return, canceling the
     /// call if it is still outstanding.
     pub fn deinit(self: *Promise) void {
-        if (self.finished) return;
-        if (self.local_response) |*response| {
-            response.deinit();
-            self.local_response = null;
+        switch (self.state) {
+            .finished => {},
+            .local_response => |*response| {
+                response.deinit();
+                self.state = .finished;
+            },
+            .question => |question| {
+                self.state = .finished;
+                question.release();
+            },
         }
-        if (self.question) |question| {
-            self.question = null;
-            question.release();
-        }
-        self.finished = true;
     }
 
     pub fn wait(self: *Promise) !Response {
-        if (self.finished) return error.AlreadyFinished;
-        if (self.local_response) |response| {
-            self.local_response = null;
-            self.finished = true;
-            return response;
+        switch (self.state) {
+            .finished => return error.AlreadyFinished,
+            .local_response => |response| {
+                self.state = .finished;
+                return response;
+            },
+            .question => |question| {
+                var response = try self.connection.waitReturn(question.id);
+                response.attachQuestion(question);
+                self.state = .finished;
+                return response;
+            },
         }
-        const question = self.question orelse return error.AlreadyFinished;
-        var response = try self.connection.waitReturn(question.id);
-        response.question = question;
-        self.question = null;
-        self.finished = true;
-        return response;
     }
 
     /// Non-blocking completion check. The caller is responsible for driving
     /// `Connection.step()` as transport events arrive.
     pub fn tryTake(self: *Promise) !?Response {
-        if (self.finished) return error.AlreadyFinished;
-        if (self.local_response) |response| {
-            self.local_response = null;
-            self.finished = true;
-            return response;
+        switch (self.state) {
+            .finished => return error.AlreadyFinished,
+            .local_response => |response| {
+                self.state = .finished;
+                return response;
+            },
+            .question => |question| {
+                const response = (try self.connection.takeReturn(question.id)) orelse return null;
+                var result = response;
+                result.attachQuestion(question);
+                self.state = .finished;
+                return result;
+            },
         }
-        const question = self.question orelse return error.AlreadyFinished;
-        const response = (try self.connection.takeReturn(question.id)) orelse return null;
-        var result = response;
-        result.question = question;
-        self.question = null;
-        self.finished = true;
-        return result;
     }
 
     /// Return a capability handle addressing the root result, or a pointer
     /// field within the result struct. The caller owns the handle.
     pub fn capability(self: *Promise, pointer_field: ?u16) !Capability {
-        if (self.finished) return error.AlreadyFinished;
-        if (self.local_response != null) return error.LocalPipeliningUnsupported;
-        const question = self.question orelse return error.AlreadyFinished;
-        return self.connection.newAnswerCapability(question, pointer_field);
+        switch (self.state) {
+            .finished => return error.AlreadyFinished,
+            .local_response => return error.LocalPipeliningUnsupported,
+            .question => |question| return self.connection.newAnswerCapability(question, pointer_field),
+        }
     }
+};
+
+pub const BootstrapPromiseState = union(enum) {
+    question: *QuestionRef,
+    finished: void,
 };
 
 pub const BootstrapPromise = struct {
     connection: *Connection,
-    question: ?*QuestionRef = null,
-    finished: bool = false,
+    state: BootstrapPromiseState,
 
     /// Release this bootstrap request without waiting for its Return.
     pub fn deinit(self: *BootstrapPromise) void {
-        if (self.finished) return;
-        if (self.question) |question| {
-            self.question = null;
-            question.release();
+        switch (self.state) {
+            .finished => {},
+            .question => |question| {
+                self.state = .finished;
+                question.release();
+            },
         }
-        self.finished = true;
     }
 
     /// Return a capability handle addressing the bootstrap result. The caller
     /// owns the handle. As with `Promise.capability`, this can be used to
     /// pipeline calls before the bootstrap Return arrives.
     pub fn capability(self: *BootstrapPromise) !Capability {
-        if (self.finished) return error.AlreadyFinished;
-        const question = self.question orelse return error.AlreadyFinished;
-        return self.connection.newAnswerCapability(question, null);
+        switch (self.state) {
+            .finished => return error.AlreadyFinished,
+            .question => |question| return self.connection.newAnswerCapability(question, null),
+        }
     }
 
     pub fn wait(self: *BootstrapPromise) !Capability {
-        if (self.finished) return error.AlreadyFinished;
-        const question = self.question orelse return error.AlreadyFinished;
-        var response = self.connection.waitReturn(question.id) catch |err| {
-            self.question = null;
-            self.finished = true;
-            question.release();
-            return err;
-        };
-        defer response.deinit();
+        switch (self.state) {
+            .finished => return error.AlreadyFinished,
+            .question => |question| {
+                var response = self.connection.waitReturn(question.id) catch |err| {
+                    self.state = .finished;
+                    question.release();
+                    return err;
+                };
+                defer response.deinit();
 
-        const bootstrap_capability = self.connection.finishBootstrap(&response) catch |err| {
-            self.question = null;
-            self.finished = true;
-            question.release();
-            return err;
-        };
+                const bootstrap_capability = self.connection.finishBootstrap(&response) catch |err| {
+                    self.state = .finished;
+                    question.release();
+                    return err;
+                };
 
-        question.caps_taken = !isNone(bootstrap_capability);
-        self.question = null;
-        self.finished = true;
-        question.release();
-        return bootstrap_capability;
+                question.caps_taken = !isNone(bootstrap_capability);
+                self.state = .finished;
+                question.release();
+                return bootstrap_capability;
+            },
+        }
     }
 
     /// Non-blocking completion check. The caller is responsible for driving
     /// `Connection.step()` as transport events arrive.
     pub fn tryTake(self: *BootstrapPromise) !?Capability {
-        if (self.finished) return error.AlreadyFinished;
-        const question = self.question orelse return error.AlreadyFinished;
-        const response = (self.connection.takeReturn(question.id) catch |err| {
-            self.question = null;
-            self.finished = true;
-            question.release();
-            return err;
-        }) orelse return null;
-        var result = response;
-        defer result.deinit();
+        switch (self.state) {
+            .finished => return error.AlreadyFinished,
+            .question => |question| {
+                const response = (self.connection.takeReturn(question.id) catch |err| {
+                    self.state = .finished;
+                    question.release();
+                    return err;
+                }) orelse return null;
+                var result = response;
+                defer result.deinit();
 
-        const bootstrap_capability = self.connection.finishBootstrap(&result) catch |err| {
-            self.question = null;
-            self.finished = true;
-            question.release();
-            return err;
-        };
+                const bootstrap_capability = self.connection.finishBootstrap(&result) catch |err| {
+                    self.state = .finished;
+                    question.release();
+                    return err;
+                };
 
-        question.caps_taken = !isNone(bootstrap_capability);
-        self.question = null;
-        self.finished = true;
-        question.release();
-        return bootstrap_capability;
+                question.caps_taken = !isNone(bootstrap_capability);
+                self.state = .finished;
+                question.release();
+                return bootstrap_capability;
+            },
+        }
     }
 };
+
+pub const ConnectionLifecycle = enum { open, closing, closed };
+pub const ConnectionDrainState = enum { idle, draining };
 
 pub const Connection = struct {
     allocator: std.mem.Allocator,
@@ -718,10 +812,9 @@ pub const Connection = struct {
     answer_capabilities: std.ArrayList(*AnswerCapability) = .empty,
     dispatch_depth: usize = 0,
     deferred_calls: std.ArrayList(PendingCall) = .empty,
-    draining: bool = false,
+    drain_state: ConnectionDrainState = .idle,
     pending_error: ?anyerror = null,
-    closing: bool = false,
-    closed: bool = false,
+    lifecycle: ConnectionLifecycle = .open,
 
     pub fn init(allocator: std.mem.Allocator, transport_value: Transport) !*Connection {
         const self = try allocator.create(Connection);
@@ -749,7 +842,7 @@ pub const Connection = struct {
     }
 
     pub fn isClosed(self: *Connection) bool {
-        return self.closed or self.transport.isClosed();
+        return self.lifecycle == .closed or self.transport.isClosed();
     }
 
     pub fn deinit(self: *Connection) void {
@@ -758,7 +851,7 @@ pub const Connection = struct {
             // Keep the peer from retaining a pointer to freed connection state.
             if (peer.peer == self) peer.peer = null;
         }
-        self.closing = true;
+        self.lifecycle = .closing;
         self.bootstrap_capability.release();
         self.bootstrap_capability = .none;
 
@@ -828,7 +921,7 @@ pub const Connection = struct {
         for (self.deferred_calls.items) |item| self.allocator.free(item.bytes);
         self.deferred_calls.deinit(self.allocator);
 
-        self.closed = true;
+        self.lifecycle = .closed;
         allocator.destroy(self);
     }
 
@@ -876,9 +969,9 @@ pub const Connection = struct {
     }
 
     fn finishQuestion(self: *Connection, question: *QuestionRef) void {
-        if (!question.finish_sent) {
-            question.finish_sent = true;
-            if (!self.closing) {
+        if (question.finish_state == .not_sent) {
+            question.finish_state = .sent;
+            if (self.lifecycle == .open) {
                 self.sendFinish(question.id, !question.caps_taken) catch |err| self.noteError(err);
             }
         }
@@ -896,10 +989,10 @@ pub const Connection = struct {
         err: anyerror,
         abort_type: rpc.Exception.Type,
     ) anyerror {
-        if (!self.closed and !self.closing) {
+        if (self.lifecycle == .open) {
             self.sendAbort(@errorName(err), abort_type) catch {};
         }
-        self.closed = true;
+        self.lifecycle = .closed;
         return err;
     }
 
@@ -974,7 +1067,7 @@ pub const Connection = struct {
     /// Process all currently available messages and flush buffered output.
     /// This never waits for the transport.
     pub fn step(self: *Connection) !void {
-        if (self.closed) return error.EndOfStream;
+        if (self.lifecycle == .closed) return error.EndOfStream;
         if (self.pending_error) |err| {
             self.pending_error = null;
             return err;
@@ -1025,7 +1118,7 @@ pub const Connection = struct {
         defer self.allocator.free(bytes);
 
         try self.sendRaw(bytes);
-        return .{ .connection = self, .question = question };
+        return .{ .connection = self, .state = .{ .question = question } };
     }
 
     pub fn bootstrap(self: *Connection) !Capability {
@@ -1057,7 +1150,7 @@ pub const Connection = struct {
             .capability = .none,
             .wire_refs = 0,
             .handle_refs = 1,
-            .is_promise = true,
+            .kind = .promise,
         };
         try self.exports.put(export_id, entry);
         return .{ .promised = entry };
@@ -1069,9 +1162,9 @@ pub const Connection = struct {
             else => return error.NotPromise,
         };
         if (entry.connection != self) return error.WrongConnection;
-        if (!entry.is_promise) return error.NotPromise;
+        if (entry.kind != .promise) return error.NotPromise;
 
-        entry.is_promise = false;
+        entry.kind = .hosted;
         const previous = entry.capability;
         entry.capability = target.retain();
         if (!isNone(previous)) previous.release();
@@ -1100,12 +1193,12 @@ pub const Connection = struct {
             // queued. Let the replay claim it again without tripping the
             // duplicate-question check, while preserving any pipelined calls
             // already attached to it.
-            if (self.answers.getPtr(item.question_id)) |answer| answer.call_received = false;
+            if (self.answers.getPtr(item.question_id)) |answer| answer.call_state = .reserved;
             self.handle(item.bytes) catch |err| {
                 // If replay failed before the answer could be claimed again,
                 // keep treating the question as received so a duplicate Call
                 // cannot overwrite the entry.
-                if (self.answers.getPtr(item.question_id)) |answer| answer.call_received = true;
+                if (self.answers.getPtr(item.question_id)) |answer| answer.call_state = .received;
                 self.sendException(item.question_id, err, true) catch {};
             };
         }
@@ -1141,7 +1234,7 @@ pub const Connection = struct {
         method_id: u16,
     ) !Request {
         if (entry.connection != self) return error.WrongConnection;
-        if (entry.is_promise) return error.LocalTargetUnsupported;
+        if (entry.kind == .promise) return error.LocalTargetUnsupported;
         return self.beginCall(entry.capability, interface_id, method_id);
     }
 
@@ -1184,11 +1277,13 @@ pub const Connection = struct {
         const retained_target: Capability = .{ .imported = entry };
         return .{
             .connection = self,
-            .message = message,
-            .call = call,
-            .question_id = question.id,
-            .question = question,
-            .target = retained_target.retain(),
+            .state = .{ .pending = .{
+                .message = message,
+                .call = call,
+                .question_id = question.id,
+                .question = question,
+                .target = retained_target.retain(),
+            } },
         };
     }
 
@@ -1215,11 +1310,13 @@ pub const Connection = struct {
         const retained_target: Capability = .{ .local = entry };
         return .{
             .connection = self,
-            .message = message,
-            .call = call,
-            .question_id = question_id,
-            .local_target = entry,
-            .target = retained_target.retain(),
+            .state = .{ .pending = .{
+                .message = message,
+                .call = call,
+                .question_id = question_id,
+                .local_target = entry,
+                .target = retained_target.retain(),
+            } },
         };
     }
 
@@ -1280,11 +1377,13 @@ pub const Connection = struct {
         const retained_target: Capability = .{ .answer_pipeline = entry };
         return .{
             .connection = self,
-            .message = message,
-            .call = call,
-            .question_id = question.id,
-            .question = question,
-            .target = retained_target.retain(),
+            .state = .{ .pending = .{
+                .message = message,
+                .call = call,
+                .question_id = question.id,
+                .question = question,
+                .target = retained_target.retain(),
+            } },
         };
     }
 
@@ -1360,7 +1459,7 @@ pub const Connection = struct {
         while (true) {
             if (try self.takeReturn(question_id)) |response| return response;
 
-            if (self.closed) return error.EndOfStream;
+            if (self.lifecycle == .closed) return error.EndOfStream;
 
             if (self.transport.isClosed()) {
                 // Drain anything that was already buffered before the close.
@@ -1438,7 +1537,7 @@ pub const Connection = struct {
                 try self.handleRelease(release);
             },
             .abort => {
-                self.closed = true;
+                self.lifecycle = .closed;
                 return error.ConnectionAborted;
             },
             else => return self.failConnection(error.UnsupportedMessage, .unimplemented),
@@ -1481,7 +1580,7 @@ pub const Connection = struct {
         cap_table.get(0).setSenderHosted(export_id);
 
         const answer = try self.ensureAnswer(question_id);
-        answer.call_received = true;
+        answer.call_state = .received;
         try answer.export_ids.append(self.allocator, export_id);
 
         const bytes = try message.toBytes(self.allocator);
@@ -1498,7 +1597,7 @@ pub const Connection = struct {
             return;
         }
         if (self.answers.getPtr(question_id)) |answer| {
-            if (answer.call_received) {
+            if (answer.call_state == .received) {
                 try self.sendException(question_id, error.DuplicateQuestion, true);
                 return;
             }
@@ -1520,7 +1619,7 @@ pub const Connection = struct {
             return;
         };
 
-        if (entry.is_promise) {
+        if (entry.kind == .promise) {
             try self.queuePromiseCall(entry, question_id, bytes);
             return;
         }
@@ -1579,7 +1678,7 @@ pub const Connection = struct {
         errdefer _ = self.queued_questions.remove(question_id);
 
         const answer = try self.ensureAnswer(question_id);
-        answer.call_received = true;
+        answer.call_state = .received;
     }
 
     /// Queue a pipelined call until the answer it depends on is resolved.
@@ -1619,7 +1718,7 @@ pub const Connection = struct {
                     try self.sendException(question_id, error.ForeignCapability, true);
                     return;
                 }
-                if (entry.is_promise) {
+                if (entry.kind == .promise) {
                     try self.queuePromiseCall(entry, question_id, bytes);
                     return;
                 }
@@ -1671,7 +1770,7 @@ pub const Connection = struct {
 
         if (local_sink == null) {
             const answer = try self.ensureAnswer(question_id);
-            answer.call_received = true;
+            answer.call_state = .received;
             for (params_caps) |capability| {
                 try answer.held_caps.append(self.allocator, capability.retain());
             }
@@ -1745,9 +1844,9 @@ pub const Connection = struct {
     }
 
     fn drainDeferredCalls(self: *Connection) anyerror!void {
-        if (self.draining or self.dispatch_depth != 0) return;
-        self.draining = true;
-        defer self.draining = false;
+        if (self.drain_state == .draining or self.dispatch_depth != 0) return;
+        self.drain_state = .draining;
+        defer self.drain_state = .idle;
 
         while (self.deferred_calls.items.len != 0) {
             if (self.dispatch_depth != 0) return;
@@ -2113,7 +2212,7 @@ pub const Connection = struct {
             entry.resolved = .none;
         }
 
-        if (entry.wire_refs > 0 and !self.closing) {
+        if (entry.wire_refs > 0 and self.lifecycle == .open) {
             self.sendRelease(entry.export_id, entry.wire_refs) catch |err| self.noteError(err);
         }
         self.allocator.destroy(entry);
@@ -2138,7 +2237,7 @@ pub const Connection = struct {
             },
             .promised => |entry| {
                 if (entry.connection != self) return error.ForeignCapability;
-                if (!entry.is_promise) return self.encodeCapability(entry.capability, descriptor);
+                if (entry.kind != .promise) return self.encodeCapability(entry.capability, descriptor);
                 const export_id = try self.exportShared(capability);
                 descriptor.setSenderPromise(export_id);
                 return export_id;
