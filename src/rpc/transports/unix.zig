@@ -5,11 +5,11 @@
 //! non-blocking I/O live in `unix_io.zig`.
 
 const std = @import("std");
-const connection = @import("../connection.zig");
+const transport = @import("../transport.zig");
 const io = @import("unix_io.zig");
 
-const Transport = connection.Transport;
-const Side = connection.Side;
+const Transport = transport.Transport;
+const Side = transport.Side;
 
 const read_chunk_size = 64 * 1024;
 
@@ -70,9 +70,8 @@ pub const Stream = struct {
         return .{ .context = self, .side = side, .vtable = &vtable };
     }
 
-    fn send(context: *anyopaque, side: Side, bytes: []const u8) anyerror!void {
-        _ = side;
-        const self: *Stream = @ptrCast(@alignCast(context));
+    fn send(t: Transport, bytes: []const u8) anyerror!void {
+        const self: *Stream = @ptrCast(@alignCast(t.context));
         if (self.closed) return error.EndOfStream;
 
         try self.writer.append(bytes);
@@ -80,12 +79,10 @@ pub const Stream = struct {
     }
 
     fn receive(
-        context: *anyopaque,
-        side: Side,
+        t: Transport,
         allocator: std.mem.Allocator,
     ) anyerror!?[]u8 {
-        _ = side;
-        const self: *Stream = @ptrCast(@alignCast(context));
+        const self: *Stream = @ptrCast(@alignCast(t.context));
 
         while (true) {
             if (try self.reader.next(allocator, self.options)) |message| {
@@ -100,6 +97,10 @@ pub const Stream = struct {
             const dest = spare[0..@min(spare.len, read_chunk_size)];
             const n = self.socket.read(dest) catch |err| switch (err) {
                 error.WouldBlock => return null,
+                error.ConnectionResetByPeer => {
+                    self.closed = true;
+                    return null;
+                },
                 else => {
                     self.closed = true;
                     return err;
@@ -121,27 +122,23 @@ pub const Stream = struct {
         };
     }
 
-    fn flush(context: *anyopaque, side: Side) anyerror!void {
-        _ = side;
-        const self: *Stream = @ptrCast(@alignCast(context));
+    fn flush(t: Transport) anyerror!void {
+        const self: *Stream = @ptrCast(@alignCast(t.context));
         try self.flushPending();
     }
 
-    fn fd(context: *anyopaque, side: Side) std.posix.fd_t {
-        _ = side;
-        const self: *Stream = @ptrCast(@alignCast(context));
+    fn fd(t: Transport) std.posix.fd_t {
+        const self: *Stream = @ptrCast(@alignCast(t.context));
         return self.socket.fd;
     }
 
-    fn wantsWrite(context: *anyopaque, side: Side) bool {
-        _ = side;
-        const self: *Stream = @ptrCast(@alignCast(context));
+    fn wantsWrite(t: Transport) bool {
+        const self: *Stream = @ptrCast(@alignCast(t.context));
         return !self.writer.isEmpty();
     }
 
-    fn isClosed(context: *anyopaque, side: Side) bool {
-        _ = side;
-        const self: *Stream = @ptrCast(@alignCast(context));
+    fn isClosed(t: Transport) bool {
+        const self: *Stream = @ptrCast(@alignCast(t.context));
         return self.closed;
     }
 };

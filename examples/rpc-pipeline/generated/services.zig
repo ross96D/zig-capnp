@@ -318,6 +318,10 @@ pub const Factory = struct {
             return self.request.addCapability(capability);
         }
 
+        pub fn addLocalCapability(self: *@This(), capability: _capnp_rpc.LocalCapability) !u32 {
+            return self.request.addLocalCapability(capability);
+        }
+
         pub fn start(self: *@This()) !_capnp_rpc.Promise {
             return self.request.start();
         }
@@ -340,6 +344,10 @@ pub const Factory = struct {
 
         pub fn addCapability(self: *@This(), capability: _capnp_rpc.Capability) !u32 {
             return self.request.addCapability(capability);
+        }
+
+        pub fn addLocalCapability(self: *@This(), capability: _capnp_rpc.LocalCapability) !u32 {
+            return self.request.addLocalCapability(capability);
         }
 
         pub fn start(self: *@This()) !_capnp_rpc.Promise {
@@ -366,6 +374,10 @@ pub const Factory = struct {
             return self.request.addCapability(capability);
         }
 
+        pub fn addLocalCapability(self: *@This(), capability: _capnp_rpc.LocalCapability) !u32 {
+            return self.request.addLocalCapability(capability);
+        }
+
         pub fn start(self: *@This()) !_capnp_rpc.Promise {
             return self.request.start();
         }
@@ -382,16 +394,22 @@ pub const Factory = struct {
     pub const Client = struct {
         capability: _capnp_rpc.Capability,
 
+        /// Takes ownership of `capability`; release it with `deinit`.
         pub fn fromCapability(capability: _capnp_rpc.Capability) @This() {
             return .{ .capability = capability };
         }
-        pub fn getGreeter(self: @This()) !GetGreeterRequest {
+
+        /// Release the owned capability handle.
+        pub fn deinit(self: *@This()) void {
+            self.capability.release();
+        }
+        pub fn getGreeter(self: *@This()) !GetGreeterRequest {
             return .{ .request = try self.capability.beginCall(0xc66e29aae0c8feb7, 0) };
         }
-        pub fn getCalculator(self: @This()) !GetCalculatorRequest {
+        pub fn getCalculator(self: *@This()) !GetCalculatorRequest {
             return .{ .request = try self.capability.beginCall(0xc66e29aae0c8feb7, 1) };
         }
-        pub fn version(self: @This()) !VersionRequest {
+        pub fn version(self: *@This()) !VersionRequest {
             return .{ .request = try self.capability.beginCall(0xc66e29aae0c8feb7, 2) };
         }
     };
@@ -399,6 +417,8 @@ pub const Factory = struct {
     pub const Server = struct {
         context: *anyopaque,
         vtable: VTable,
+        /// Optional. Called when the last handle and wire export are gone.
+        destroy: ?*const fn (context: *anyopaque) void = null,
 
         pub const VTable = struct {
             getGreeter: *const fn (context: *anyopaque, params: GetGreeterParams.Reader, results: GetGreeterResults.Builder, capnp_call: _capnp_rpc.Call) anyerror!void,
@@ -407,7 +427,7 @@ pub const Factory = struct {
         };
 
         pub fn localCapability(self: *@This()) _capnp_rpc.LocalCapability {
-            return .{ .context = self, .interface_id = 0xc66e29aae0c8feb7, .dispatch = dispatch };
+            return .{ .context = self, .interface_id = 0xc66e29aae0c8feb7, .dispatch = dispatch, .destroy = self.destroy };
         }
 
         fn dispatch(capnp_context: *anyopaque, capnp_method_id: u16, capnp_call: _capnp_rpc.Call) anyerror!void {
@@ -674,6 +694,10 @@ pub const Greeter = struct {
             return self.request.addCapability(capability);
         }
 
+        pub fn addLocalCapability(self: *@This(), capability: _capnp_rpc.LocalCapability) !u32 {
+            return self.request.addLocalCapability(capability);
+        }
+
         pub fn start(self: *@This()) !_capnp_rpc.Promise {
             return self.request.start();
         }
@@ -698,6 +722,10 @@ pub const Greeter = struct {
             return self.request.addCapability(capability);
         }
 
+        pub fn addLocalCapability(self: *@This(), capability: _capnp_rpc.LocalCapability) !u32 {
+            return self.request.addLocalCapability(capability);
+        }
+
         pub fn start(self: *@This()) !_capnp_rpc.Promise {
             return self.request.start();
         }
@@ -714,13 +742,19 @@ pub const Greeter = struct {
     pub const Client = struct {
         capability: _capnp_rpc.Capability,
 
+        /// Takes ownership of `capability`; release it with `deinit`.
         pub fn fromCapability(capability: _capnp_rpc.Capability) @This() {
             return .{ .capability = capability };
         }
-        pub fn hello(self: @This()) !HelloRequest {
+
+        /// Release the owned capability handle.
+        pub fn deinit(self: *@This()) void {
+            self.capability.release();
+        }
+        pub fn hello(self: *@This()) !HelloRequest {
             return .{ .request = try self.capability.beginCall(0xc99ab1b26e4a5614, 0) };
         }
-        pub fn farewell(self: @This()) !FarewellRequest {
+        pub fn farewell(self: *@This()) !FarewellRequest {
             return .{ .request = try self.capability.beginCall(0xc99ab1b26e4a5614, 1) };
         }
     };
@@ -728,6 +762,8 @@ pub const Greeter = struct {
     pub const Server = struct {
         context: *anyopaque,
         vtable: VTable,
+        /// Optional. Called when the last handle and wire export are gone.
+        destroy: ?*const fn (context: *anyopaque) void = null,
 
         pub const VTable = struct {
             hello: *const fn (context: *anyopaque, params: HelloParams.Reader, results: HelloResults.Builder, capnp_call: _capnp_rpc.Call) anyerror!void,
@@ -735,7 +771,7 @@ pub const Greeter = struct {
         };
 
         pub fn localCapability(self: *@This()) _capnp_rpc.LocalCapability {
-            return .{ .context = self, .interface_id = 0xc99ab1b26e4a5614, .dispatch = dispatch };
+            return .{ .context = self, .interface_id = 0xc99ab1b26e4a5614, .dispatch = dispatch, .destroy = self.destroy };
         }
 
         fn dispatch(capnp_context: *anyopaque, capnp_method_id: u16, capnp_call: _capnp_rpc.Call) anyerror!void {
@@ -1021,6 +1057,10 @@ pub const Calculator = struct {
             return self.request.addCapability(capability);
         }
 
+        pub fn addLocalCapability(self: *@This(), capability: _capnp_rpc.LocalCapability) !u32 {
+            return self.request.addLocalCapability(capability);
+        }
+
         pub fn start(self: *@This()) !_capnp_rpc.Promise {
             return self.request.start();
         }
@@ -1045,6 +1085,10 @@ pub const Calculator = struct {
             return self.request.addCapability(capability);
         }
 
+        pub fn addLocalCapability(self: *@This(), capability: _capnp_rpc.LocalCapability) !u32 {
+            return self.request.addLocalCapability(capability);
+        }
+
         pub fn start(self: *@This()) !_capnp_rpc.Promise {
             return self.request.start();
         }
@@ -1061,13 +1105,19 @@ pub const Calculator = struct {
     pub const Client = struct {
         capability: _capnp_rpc.Capability,
 
+        /// Takes ownership of `capability`; release it with `deinit`.
         pub fn fromCapability(capability: _capnp_rpc.Capability) @This() {
             return .{ .capability = capability };
         }
-        pub fn add(self: @This()) !AddRequest {
+
+        /// Release the owned capability handle.
+        pub fn deinit(self: *@This()) void {
+            self.capability.release();
+        }
+        pub fn add(self: *@This()) !AddRequest {
             return .{ .request = try self.capability.beginCall(0xb7e9c61fc22255fc, 0) };
         }
-        pub fn multiply(self: @This()) !MultiplyRequest {
+        pub fn multiply(self: *@This()) !MultiplyRequest {
             return .{ .request = try self.capability.beginCall(0xb7e9c61fc22255fc, 1) };
         }
     };
@@ -1075,6 +1125,8 @@ pub const Calculator = struct {
     pub const Server = struct {
         context: *anyopaque,
         vtable: VTable,
+        /// Optional. Called when the last handle and wire export are gone.
+        destroy: ?*const fn (context: *anyopaque) void = null,
 
         pub const VTable = struct {
             add: *const fn (context: *anyopaque, params: AddParams.Reader, results: AddResults.Builder, capnp_call: _capnp_rpc.Call) anyerror!void,
@@ -1082,7 +1134,7 @@ pub const Calculator = struct {
         };
 
         pub fn localCapability(self: *@This()) _capnp_rpc.LocalCapability {
-            return .{ .context = self, .interface_id = 0xb7e9c61fc22255fc, .dispatch = dispatch };
+            return .{ .context = self, .interface_id = 0xb7e9c61fc22255fc, .dispatch = dispatch, .destroy = self.destroy };
         }
 
         fn dispatch(capnp_context: *anyopaque, capnp_method_id: u16, capnp_call: _capnp_rpc.Call) anyerror!void {
@@ -1220,6 +1272,10 @@ pub const Calculator = struct {
                 return self.request.addCapability(capability);
             }
 
+            pub fn addLocalCapability(self: *@This(), capability: _capnp_rpc.LocalCapability) !u32 {
+                return self.request.addLocalCapability(capability);
+            }
+
             pub fn start(self: *@This()) !_capnp_rpc.Promise {
                 return self.request.start();
             }
@@ -1236,10 +1292,16 @@ pub const Calculator = struct {
         pub const Client = struct {
             capability: _capnp_rpc.Capability,
 
+            /// Takes ownership of `capability`; release it with `deinit`.
             pub fn fromCapability(capability: _capnp_rpc.Capability) @This() {
                 return .{ .capability = capability };
             }
-            pub fn eval(self: @This()) !EvalRequest {
+
+            /// Release the owned capability handle.
+            pub fn deinit(self: *@This()) void {
+                self.capability.release();
+            }
+            pub fn eval(self: *@This()) !EvalRequest {
                 return .{ .request = try self.capability.beginCall(0xbbf10330814fd4c8, 0) };
             }
         };
@@ -1247,13 +1309,15 @@ pub const Calculator = struct {
         pub const Server = struct {
             context: *anyopaque,
             vtable: VTable,
+            /// Optional. Called when the last handle and wire export are gone.
+            destroy: ?*const fn (context: *anyopaque) void = null,
 
             pub const VTable = struct {
                 eval: *const fn (context: *anyopaque, params: EvalParams.Reader, results: EvalResults.Builder, capnp_call: _capnp_rpc.Call) anyerror!void,
             };
 
             pub fn localCapability(self: *@This()) _capnp_rpc.LocalCapability {
-                return .{ .context = self, .interface_id = 0xbbf10330814fd4c8, .dispatch = dispatch };
+                return .{ .context = self, .interface_id = 0xbbf10330814fd4c8, .dispatch = dispatch, .destroy = self.destroy };
             }
 
             fn dispatch(capnp_context: *anyopaque, capnp_method_id: u16, capnp_call: _capnp_rpc.Call) anyerror!void {

@@ -1,7 +1,7 @@
 const std = @import("std");
-const connection = @import("../connection.zig");
-const Transport = connection.Transport;
-const Side = connection.Side;
+const transport = @import("../transport.zig");
+const Transport = transport.Transport;
+const Side = transport.Side;
 
 /// In-memory duplex transport used by tests and local RPC.
 pub const Loopback = struct {
@@ -32,43 +32,34 @@ pub const Loopback = struct {
         return .{ .context = self, .side = side, .vtable = &vtable };
     }
 
-    fn send(context: *anyopaque, side: Side, bytes: []const u8) anyerror!void {
-        const self: *Loopback = @ptrCast(@alignCast(context));
+    fn send(t: Transport, bytes: []const u8) anyerror!void {
+        const self: *Loopback = @ptrCast(@alignCast(t.context));
         const copy = try self.allocator.dupe(u8, bytes);
         errdefer self.allocator.free(copy);
 
-        const peer: usize = 1 - @backingInt(side);
+        const peer: usize = 1 - @backingInt(t.side);
         try self.queues[peer].append(self.allocator, copy);
     }
 
-    fn receive(context: *anyopaque, side: Side, allocator: std.mem.Allocator) anyerror!?[]u8 {
+    fn receive(t: Transport, allocator: std.mem.Allocator) anyerror!?[]u8 {
         _ = allocator;
-        const self: *Loopback = @ptrCast(@alignCast(context));
-        const idx = @backingInt(side);
+        const self: *Loopback = @ptrCast(@alignCast(t.context));
+        const idx = @backingInt(t.side);
         if (self.queues[idx].items.len == 0) return null;
         return self.queues[idx].orderedRemove(0);
     }
 
-    fn flush(context: *anyopaque, side: Side) anyerror!void {
-        _ = context;
-        _ = side;
-    }
+    fn flush(_: Transport) anyerror!void {}
 
-    fn fd(context: *anyopaque, side: Side) std.posix.fd_t {
-        _ = context;
-        _ = side;
+    fn fd(_: Transport) std.posix.fd_t {
         return -1;
     }
 
-    fn wantsWrite(context: *anyopaque, side: Side) bool {
-        _ = context;
-        _ = side;
+    fn wantsWrite(_: Transport) bool {
         return false;
     }
 
-    fn isClosed(context: *anyopaque, side: Side) bool {
-        _ = context;
-        _ = side;
+    fn isClosed(_: Transport) bool {
         return false;
     }
 };

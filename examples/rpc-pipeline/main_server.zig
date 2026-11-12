@@ -50,7 +50,7 @@ const CalculatorImpl = struct {
             try int_expr.capabilityForParam(call, try params.b()),
         );
         const result = try int_expr.IntExpr.init(state.allocator, a + b);
-        const index = try call.addResultCapability(.{ .local = result.capability() });
+        const index = try call.addLocalResultCapability(result.capability());
         results.result().setCapability(index);
     }
 
@@ -70,7 +70,7 @@ const CalculatorImpl = struct {
             try int_expr.capabilityForParam(call, try params.b()),
         );
         const result = try int_expr.IntExpr.init(state.allocator, a * b);
-        const index = try call.addResultCapability(.{ .local = result.capability() });
+        const index = try call.addLocalResultCapability(result.capability());
         results.result().setCapability(index);
     }
 };
@@ -88,7 +88,7 @@ const FactoryImpl = struct {
         call: capnp_rpc.Call,
     ) anyerror!void {
         const services: *Services = @ptrCast(@alignCast(context));
-        const index = try call.addResultCapability(.{ .local = services.greeter });
+        const index = try call.addLocalResultCapability(services.greeter);
         results.greeter().setCapability(index);
     }
 
@@ -99,7 +99,7 @@ const FactoryImpl = struct {
         call: capnp_rpc.Call,
     ) anyerror!void {
         const services: *Services = @ptrCast(@alignCast(context));
-        const index = try call.addResultCapability(.{ .local = services.calculator });
+        const index = try call.addLocalResultCapability(services.calculator);
         results.calculator().setCapability(index);
     }
 
@@ -146,8 +146,9 @@ pub fn main() !void {
         var connection = try capnp_rpc.Connection.init(allocator, stream.endpoint(.server));
         defer connection.deinit();
 
+        var stateless_server_context: u8 = 0;
         var greeter_server = schema.Greeter.Server{
-            .context = undefined,
+            .context = &stateless_server_context,
             .vtable = .{
                 .hello = GreeterImpl.hello,
                 .farewell = GreeterImpl.farewell,
@@ -174,21 +175,21 @@ pub fn main() !void {
                 .version = FactoryImpl.version,
             },
         };
-        connection.setBootstrap(.{ .local = factory_server.localCapability() });
+        connection.setBootstrap(try connection.initLocal(factory_server.localCapability()));
 
         while (true) {
             var events: i16 = std.posix.POLL.IN;
-            if (connection.transport.wantsWrite()) events |= std.posix.POLL.OUT;
+            if (connection.wantsWrite()) events |= std.posix.POLL.OUT;
 
             var fds = [1]std.posix.pollfd{.{
-                .fd = connection.transport.fd(),
+                .fd = connection.fd(),
                 .events = events,
                 .revents = 0,
             }};
             _ = try std.posix.poll(&fds, -1);
 
             try connection.step();
-            if (connection.transport.isClosed()) break;
+            if (connection.isClosed()) break;
         }
     }
 }

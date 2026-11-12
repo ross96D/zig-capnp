@@ -6,7 +6,11 @@ const int_expr = @import("int_expr.zig");
 const socket_path = "/tmp/zig-capnp-rpc-pipeline.sock";
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    var safe_allocator = std.heap.SafeAllocator.init(std.heap.page_allocator, .{});
+    defer {
+        _ = safe_allocator.deinit();
+    }
+    const allocator = safe_allocator.allocator();
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -17,13 +21,14 @@ pub fn main() !void {
     defer connection.deinit();
 
     const factory_capability = try connection.bootstrap();
-    const factory = schema.Factory.Client.fromCapability(factory_capability);
+    var factory = schema.Factory.Client.fromCapability(factory_capability);
+    defer factory.deinit();
 
     // {
     //     var version_request = try factory.version();
     //     defer version_request.deinit();
     //     var version_response = try version_request.send();
-    //     defer version_response.deinit(allocator);
+    //     defer version_response.deinit();
     //     const version_results = try version_response.results(
     //         schema.Factory.VersionResults.Reader,
     //         schema.Factory.VersionResults.reader_trait,
@@ -45,7 +50,7 @@ pub fn main() !void {
     //         var hello_params = try hello_request.params();
     //         try hello_params.setName("Ada");
     //         var hello_response = try hello_request.send();
-    //         defer hello_response.deinit(allocator);
+    //         defer hello_response.deinit();
     //         const hello_results = try hello_response.results(
     //             schema.Greeter.HelloResults.Reader,
     //             schema.Greeter.HelloResults.reader_trait,
@@ -59,7 +64,7 @@ pub fn main() !void {
     //         var farewell_params = try farewell_request.params();
     //         try farewell_params.setName("Ada");
     //         var farewell_response = try farewell_request.send();
-    //         defer farewell_response.deinit(allocator);
+    //         defer farewell_response.deinit();
     //         const farewell_results = try farewell_response.results(
     //             schema.Greeter.FarewellResults.Reader,
     //             schema.Greeter.FarewellResults.reader_trait,
@@ -68,7 +73,7 @@ pub fn main() !void {
     //     }
 
     //     var greeter_response = try greeter_pending.wait();
-    //     defer greeter_response.deinit(allocator);
+    //     defer greeter_response.deinit();
     // }
 
     // Same idea with another interface.
@@ -77,7 +82,8 @@ pub fn main() !void {
         defer calculator_request.deinit();
         var calculator_pending = try calculator_request.start();
         const calculator_capability = try calculator_pending.capability(0);
-        const calculator = schema.Calculator.Client.fromCapability(calculator_capability);
+        var calculator = schema.Calculator.Client.fromCapability(calculator_capability);
+        defer calculator.deinit();
 
         {
             const a = try int_expr.IntExpr.init(arena.allocator(), 20);
@@ -86,8 +92,8 @@ pub fn main() !void {
 
             var add_request = try calculator.add();
             defer add_request.deinit();
-            const a_index = try add_request.addCapability(.{ .local = a.capability() });
-            const b_index = try add_request.addCapability(.{ .local = b.capability() });
+            const a_index = try add_request.addLocalCapability(a.capability());
+            const b_index = try add_request.addLocalCapability(b.capability());
             var add_params = try add_request.params();
             add_params.setA().setCapability(a_index);
             add_params.setB().setCapability(b_index);
@@ -96,32 +102,36 @@ pub fn main() !void {
 
             var multiply_request = try calculator.multiply();
             defer multiply_request.deinit();
-            const add_promise_index = try multiply_request.addCapability(try add_promise.capability(0));
-            const c_index = try multiply_request.addCapability(.{ .local = c.capability() });
+            const add_promise_cap = try add_promise.capability(0);
+            defer add_promise_cap.release();
+            const add_promise_index = try multiply_request.addCapability(add_promise_cap);
+            const c_index = try multiply_request.addLocalCapability(c.capability());
             var multiply_params = try multiply_request.params();
             multiply_params.setA().setCapability(add_promise_index);
             multiply_params.setB().setCapability(c_index);
 
             var multiply_response = try multiply_request.send();
-            defer multiply_response.deinit(allocator);
+            defer multiply_response.deinit();
             const multiply_results = try multiply_response.results(
                 schema.Calculator.MultiplyResults.Reader,
                 schema.Calculator.MultiplyResults.reader_trait,
             );
             const multiply_result = try multiply_response.capability(try (try multiply_results.result()).asCapability());
-            std.debug.print("Pipelined multiply: {d}\n", .{try int_expr.IntExpr.evalCapability(&connection, multiply_result)});
+            std.debug.print("Pipelined multiply: {d}\n", .{try int_expr.IntExpr.evalCapability(connection, multiply_result)});
+            multiply_result.release();
 
             var add_response = try add_promise.wait();
-            defer add_response.deinit(allocator);
+            defer add_response.deinit();
             const add_results = try add_response.results(
                 schema.Calculator.AddResults.Reader,
                 schema.Calculator.AddResults.reader_trait,
             );
             const add_result = try add_response.capability(try (try add_results.result()).asCapability());
-            std.debug.print("Pipelined add: {d}\n", .{try int_expr.IntExpr.evalCapability(&connection, add_result)});
+            std.debug.print("Pipelined add: {d}\n", .{try int_expr.IntExpr.evalCapability(connection, add_result)});
+            add_result.release();
         }
 
         var calculator_response = try calculator_pending.wait();
-        defer calculator_response.deinit(allocator);
+        defer calculator_response.deinit();
     }
 }

@@ -30,8 +30,8 @@ pub fn main() !void {
     var client_connection = try capnp_rpc.Connection.init(allocator, loopback.endpoint(.client));
     defer client_connection.deinit();
 
-    client_connection.peer = &server_connection;
-    server_connection.peer = &client_connection;
+    client_connection.peer = server_connection;
+    server_connection.peer = client_connection;
 
     var server_impl_1 = EchoServer{ .server_name = "server 1" };
     var server_impl_no_named = EchoServer{};
@@ -46,10 +46,11 @@ pub fn main() !void {
     };
 
     {
-        server_connection.setBootstrap(.{ .local = server_1.localCapability() });
+        server_connection.setBootstrap(try server_connection.initLocal(server_1.localCapability()));
 
         const capability = try client_connection.bootstrap();
-        const client = echo_schema.Echo.Client.fromCapability(capability);
+        var client = echo_schema.Echo.Client.fromCapability(capability);
+        defer client.deinit();
 
         var request = try client.echo();
         defer request.deinit();
@@ -58,7 +59,7 @@ pub fn main() !void {
         try params.setText("hello from Cap'n Proto RPC - 1");
 
         var response = try request.send();
-        defer response.deinit(allocator);
+        defer response.deinit();
 
         const results = try response.results(
             echo_schema.Echo.EchoResults.Reader,
@@ -68,10 +69,11 @@ pub fn main() !void {
     }
 
     {
-        server_connection.setBootstrap(.{ .local = server_no_named.localCapability() });
+        server_connection.setBootstrap(try server_connection.initLocal(server_no_named.localCapability()));
 
         const capability = try client_connection.bootstrap();
-        const client = echo_schema.Echo.Client.fromCapability(capability);
+        var client = echo_schema.Echo.Client.fromCapability(capability);
+        defer client.deinit();
 
         var request = try client.echo();
         defer request.deinit();
@@ -80,7 +82,7 @@ pub fn main() !void {
         try params.setText("hello from Cap'n Proto RPC - no_named");
 
         var response = try request.send();
-        defer response.deinit(allocator);
+        defer response.deinit();
 
         const results = try response.results(
             echo_schema.Echo.EchoResults.Reader,

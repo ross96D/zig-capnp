@@ -4,6 +4,8 @@ const capnp_rpc = @import("capnp_rpc");
 const capnpc = @import("capnpc");
 const codegen = @import("codegen");
 
+var stateless_server_context: u8 = 0;
+
 const simple = codegen.simple;
 const lists = codegen.lists;
 const composite = codegen.composite;
@@ -317,7 +319,7 @@ const TypedCalculator = struct {
         call: capnp_rpc.Call,
     ) anyerror!void {
         const value: *interfaces.Calculator.Value.Server = @ptrCast(@alignCast(context));
-        const index = try call.addResultCapability(.{ .local = value.localCapability() });
+        const index = try call.addLocalResultCapability(value.localCapability());
         results.setSum().setCapability(index);
     }
 
@@ -339,11 +341,11 @@ test "generated typed interface client and server" {
     var client_connection = try capnp_rpc.Connection.init(std.testing.allocator, loopback.endpoint(.client));
     defer client_connection.deinit();
 
-    client_connection.peer = &server_connection;
-    server_connection.peer = &client_connection;
+    client_connection.peer = server_connection;
+    server_connection.peer = client_connection;
 
     var value_server = interfaces.Calculator.Value.Server{
-        .context = undefined,
+        .context = &stateless_server_context,
         .vtable = .{
             .eval = TypedValue.eval,
         },
@@ -355,10 +357,11 @@ test "generated typed interface client and server" {
             .reset = TypedCalculator.reset,
         },
     };
-    server_connection.setBootstrap(.{ .local = server.localCapability() });
+    server_connection.setBootstrap(try server_connection.initLocal(server.localCapability()));
 
     const capability = try client_connection.bootstrap();
-    const calculator = interfaces.Calculator.Client.fromCapability(capability);
+    var calculator = interfaces.Calculator.Client.fromCapability(capability);
+    defer calculator.deinit();
 
     var request = try calculator.add();
     defer request.deinit();
@@ -367,7 +370,7 @@ test "generated typed interface client and server" {
     params.setB(40);
 
     var response = try request.send();
-    defer response.deinit(std.testing.allocator);
+    defer response.deinit();
 
     const results = try response.results(
         interfaces.Calculator.AddResults.Reader,
@@ -375,12 +378,13 @@ test "generated typed interface client and server" {
     );
     const sum = try results.sum();
     const value_capability = try response.capability(try sum.asCapability());
-    const value_client = interfaces.Calculator.Value.Client.fromCapability(value_capability);
+    var value_client = interfaces.Calculator.Value.Client.fromCapability(value_capability);
+    defer value_client.deinit();
 
     var eval_request = try value_client.eval();
     defer eval_request.deinit();
     var eval_response = try eval_request.send();
-    defer eval_response.deinit(std.testing.allocator);
+    defer eval_response.deinit();
     const eval_results = try eval_response.results(
         interfaces.Calculator.Value.EvalResults.Reader,
         interfaces.Calculator.Value.EvalResults.reader_trait,

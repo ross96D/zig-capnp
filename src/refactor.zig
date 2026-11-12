@@ -1042,6 +1042,15 @@ pub fn Refactor(comptime W: type) type {
                         try ctx.writer.writeAll("}\n\n");
 
                         try ctx.writeIndent();
+                        try ctx.writer.writeAll("pub fn addLocalCapability(self: *@This(), capability: _capnp_rpc.LocalCapability) !u32 {\n");
+                        ctx.indenter.inc();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("return self.request.addLocalCapability(capability);\n");
+                        ctx.indenter.dec();
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("}\n\n");
+
+                        try ctx.writeIndent();
                         try ctx.writer.writeAll("pub fn start(self: *@This()) !_capnp_rpc.Promise {\n");
                         ctx.indenter.inc();
                         try ctx.writeIndent();
@@ -1079,10 +1088,23 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("capability: _capnp_rpc.Capability,\n\n");
                     try ctx.writeIndent();
+                    try ctx.writer.writeAll("/// Takes ownership of `capability`; release it with `deinit`.\n");
+                    try ctx.writeIndent();
                     try ctx.writer.writeAll("pub fn fromCapability(capability: _capnp_rpc.Capability) @This() {\n");
                     ctx.indenter.inc();
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("return .{ .capability = capability };\n");
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("}\n\n");
+
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("/// Release the owned capability handle.\n");
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub fn deinit(self: *@This()) void {\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("self.capability.release();\n");
                     ctx.indenter.dec();
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("}\n");
@@ -1096,7 +1118,7 @@ pub fn Refactor(comptime W: type) type {
                         try ctx.writeIndent();
                         try ctx.writer.writeAll("pub fn ");
                         try writeReplaceKeyword(method_name, ctx.writer);
-                        try ctx.writer.writeAll("(self: @This()) !");
+                        try ctx.writer.writeAll("(self: *@This()) !");
                         try writeReplaceKeyword(request_name, ctx.writer);
                         try ctx.writer.writeAll(" {\n");
                         ctx.indenter.inc();
@@ -1117,7 +1139,11 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("context: *anyopaque,\n");
                     try ctx.writeIndent();
-                    try ctx.writer.writeAll("vtable: VTable,\n\n");
+                    try ctx.writer.writeAll("vtable: VTable,\n");
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("/// Optional. Called when the last handle and wire export are gone.\n");
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("destroy: ?*const fn (context: *anyopaque) void = null,\n\n");
 
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("pub const VTable = struct {\n");
@@ -1146,7 +1172,7 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writer.writeAll("pub fn localCapability(self: *@This()) _capnp_rpc.LocalCapability {\n");
                     ctx.indenter.inc();
                     try ctx.writeIndent();
-                    try ctx.writer.print("return .{{ .context = self, .interface_id = 0x{x}, .dispatch = dispatch }};\n", .{node.id()});
+                    try ctx.writer.print("return .{{ .context = self, .interface_id = 0x{x}, .dispatch = dispatch, .destroy = self.destroy }};\n", .{node.id()});
                     ctx.indenter.dec();
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("}\n\n");

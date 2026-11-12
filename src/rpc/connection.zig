@@ -5,61 +5,38 @@
 //! import/export reference tracking and Release messages, promise exports and
 //! resolution, promise pipelining, and loopback Disembargo handling.
 //! Third-party introductions remain out of scope.
+//!
+//! ## Capability ownership
+//!
+//! `Capability` is an owned, refcounted handle. Every handle is obtained with
+//! an initial reference and must be released exactly once with `release()`.
+//! Handles are created by:
+//!
+//!   - `Connection.initLocal`, from a borrowed `LocalCapability` descriptor,
+//!   - `Connection.bootstrap` / `BootstrapPromise`,
+//!   - `Response.capability`,
+//!   - `Promise.capability`.
+//!
+//! `Connection.setBootstrap` consumes a handle. `Request.addCapability` and
+//! `Call.addResultCapability` borrow their argument and retain it internally.
+//! `Call.capabilities` entries are released by the runtime after dispatch; a
+//! handler that stores one must call `retain()`.
+//!
+//! Local server objects are refcounted by `LocalEntry`. A `LocalCapability`
+//! may supply an optional `destroy` callback, which is invoked exactly once,
+//! when the last handle and the last wire export referencing the object are
+//! gone (or when the connection is torn down).
+//!
+//! `Connection.deinit` invalidates any handles that are still outstanding;
+//! release all handles before destroying the connection when possible.
 
 const std = @import("std");
 const capnp = @import("capnp");
-const rpc = @import("rpc.zig");
+pub const rpc = @import("rpc.zig");
 
-pub const transports = @import("transports/mod.zig");
-
-pub const Side = enum(u8) { client = 0, server = 1 };
-
-pub const Transport = struct {
-    context: *anyopaque,
-    side: Side = .client,
-    vtable: *const VTable,
-
-    pub const VTable = struct {
-        /// Non-blocking. Copy bytes into the transport's write queue and
-        /// write whatever the peer accepts immediately.
-        send: *const fn (context: *anyopaque, side: Side, bytes: []const u8) anyerror!void,
-        /// Non-blocking. Return one complete message, or null if no complete
-        /// message is currently buffered.
-        receive: *const fn (context: *anyopaque, side: Side, allocator: std.mem.Allocator) anyerror!?[]u8,
-        /// Non-blocking. Continue writing buffered outbound bytes.
-        flush: *const fn (context: *anyopaque, side: Side) anyerror!void,
-        /// File descriptor to poll, or -1 for in-memory transports.
-        fd: *const fn (context: *anyopaque, side: Side) std.posix.fd_t,
-        /// True while send() has buffered bytes waiting for writability.
-        wantsWrite: *const fn (context: *anyopaque, side: Side) bool,
-        /// True after EOF or a fatal transport error.
-        isClosed: *const fn (context: *anyopaque, side: Side) bool,
-    };
-
-    pub fn send(self: Transport, bytes: []const u8) anyerror!void {
-        return self.vtable.send(self.context, self.side, bytes);
-    }
-
-    pub fn receive(self: Transport, allocator: std.mem.Allocator) anyerror!?[]u8 {
-        return self.vtable.receive(self.context, self.side, allocator);
-    }
-
-    pub fn flush(self: Transport) anyerror!void {
-        return self.vtable.flush(self.context, self.side);
-    }
-
-    pub fn fd(self: Transport) std.posix.fd_t {
-        return self.vtable.fd(self.context, self.side);
-    }
-
-    pub fn wantsWrite(self: Transport) bool {
-        return self.vtable.wantsWrite(self.context, self.side);
-    }
-
-    pub fn isClosed(self: Transport) bool {
-        return self.vtable.isClosed(self.context, self.side);
-    }
-};
+pub const transport = @import("transport.zig");
+pub const Transport = transport.Transport;
+pub const Side = transport.Side;
 
 pub const Call = struct {
     connection: *Connection,
@@ -70,10 +47,21 @@ pub const Call = struct {
 
     /// Add a capability to the return payload and return its capability-table
     /// index. Set that index on a capability pointer in `results.content()`.
+    ///
+    /// The argument is borrowed; the runtime retains its own reference for the
+    /// duration of the call.
     pub fn addResultCapability(self: Call, capability: Capability) !u32 {
         const index: u32 = @intCast(self.result_capabilities.items.len);
-        try self.result_capabilities.append(self.connection.allocator, capability);
+        try self.result_capabilities.append(self.connection.allocator, capability.retain());
         return index;
+    }
+
+    /// Convenience for the common case of returning a local capability.
+    /// Interns the descriptor, borrows the temporary handle, and releases it.
+    pub fn addLocalResultCapability(self: Call, capability: LocalCapability) !u32 {
+        const handle = try self.connection.initLocal(capability);
+        defer handle.release();
+        return self.addResultCapability(handle);
     }
 };
 
@@ -84,61 +72,243 @@ pub const DispatchFn = *const fn (
 ) anyerror!void;
 
 pub const LocalCapability = struct {
-    context: *anyopaque,
+    /// Per-object context. Use null for stateless interfaces.
+    context: ?*anyopaque,
     interface_id: u64,
     dispatch: DispatchFn,
+    /// Optional. Called once when the last handle and wire export are gone.
+    destroy: ?*const fn (context: *anyopaque) void = null,
 };
 
-pub const ImportedCapability = struct {
-    connection: *Connection,
-    export_id: u32,
-};
+/// `DispatchFn` requires a non-null context; stateless descriptors use this
+/// stable dummy pointer so that dereferencing it remains a programming error.
+var stateless_context: u8 = 0;
+
+fn dispatchContext(context: ?*anyopaque) *anyopaque {
+    return context orelse @ptrCast(&stateless_context);
+}
 
 pub const DisembargoCallback = struct {
     context: *anyopaque,
     function: *const fn (context: *anyopaque, embargo_id: u32) void,
 };
 
-pub const PromisedCapability = struct {
-    connection: *Connection,
-    export_id: u32,
+const LocalKey = struct {
+    context: usize,
+    interface_id: u64,
+    dispatch: usize,
 };
 
-/// A capability expected to appear in the result of an outstanding question.
-pub const PromisedAnswerCapability = struct {
+const LocalKeyContext = struct {
+    pub fn hash(_: LocalKeyContext, key: LocalKey) u64 {
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(std.mem.asBytes(&key.context));
+        hasher.update(std.mem.asBytes(&key.interface_id));
+        hasher.update(std.mem.asBytes(&key.dispatch));
+        return hasher.final();
+    }
+
+    pub fn eql(_: LocalKeyContext, a: LocalKey, b: LocalKey) bool {
+        return a.context == b.context and
+            a.interface_id == b.interface_id and
+            a.dispatch == b.dispatch;
+    }
+};
+
+const LocalEntry = struct {
+    connection: *Connection,
+    key: LocalKey,
+    capability: LocalCapability,
+    refs: u32,
+    /// At most one wire export id; reused while the peer holds references.
+    export_id: ?u32 = null,
+};
+
+const ImportEntry = struct {
+    connection: *Connection,
+    export_id: u32,
+    /// Number of `senderHosted`/`senderPromise` descriptors received whose
+    /// references have not yet been returned with a Release message.
+    wire_refs: u32,
+    /// Number of live `Capability` handles sharing this import.
+    handle_refs: u32,
+    /// Set when a Resolve message names this promise. Kept alive until the
+    /// import itself is released.
+    resolved: Capability = .none,
+};
+
+const PendingCall = struct {
+    question_id: u32,
+    bytes: []u8,
+};
+
+const ExportEntry = struct {
+    connection: *Connection,
+    export_id: u32,
+    /// Owned by the export table.
+    capability: Capability,
+    wire_refs: u32,
+    /// Number of live `Capability.promised` handles.
+    handle_refs: u32 = 0,
+    is_promise: bool = false,
+    pending_calls: std.ArrayList(PendingCall) = .empty,
+};
+
+const QuestionRef = struct {
+    connection: *Connection,
+    id: u32,
+    refs: u32,
+    caps_taken: bool = false,
+    finish_sent: bool = false,
+    /// Export ids created while encoding this question's params. Used to
+    /// apply `Return.releaseParamCaps`.
+    param_export_ids: std.ArrayList(u32) = .empty,
+
+    fn retain(self: *QuestionRef) *QuestionRef {
+        self.refs += 1;
+        return self;
+    }
+
+    fn release(self: *QuestionRef) void {
+        std.debug.assert(self.refs > 0);
+        self.refs -= 1;
+        if (self.refs == 0) self.connection.finishQuestion(self);
+    }
+};
+
+const AnswerCapability = struct {
     connection: *Connection,
     question_id: u32,
     pointer_field: ?u16,
+    /// Non-null when this handle belongs to one of our outgoing questions.
+    question: ?*QuestionRef,
+    refs: u32,
+};
+
+const AnswerState = struct {
+    resolved_bytes: ?[]u8 = null,
+    pending: std.ArrayList(PendingCall) = .empty,
+    /// Export ids created while encoding this answer's cap table.
+    export_ids: std.ArrayList(u32) = .empty,
+    /// Capabilities from the params, kept alive until Finish so that result
+    /// descriptors such as receiverHosted can still resolve.
+    held_caps: std.ArrayList(Capability) = .empty,
 };
 
 pub const Capability = union(enum) {
-    local: LocalCapability,
-    imported: ImportedCapability,
-    promised: PromisedCapability,
-    promised_answer: PromisedAnswerCapability,
+    local: *LocalEntry,
+    imported: *ImportEntry,
+    promised: *ExportEntry,
+    promised_answer: *AnswerCapability,
     none: void,
+
+    /// Add one reference to this handle and return it.
+    pub fn retain(self: Capability) Capability {
+        switch (self) {
+            .local => |entry| entry.refs += 1,
+            .imported => |entry| entry.handle_refs += 1,
+            .promised => |entry| entry.handle_refs += 1,
+            .promised_answer => |entry| entry.refs += 1,
+            .none => {},
+        }
+        return self;
+    }
+
+    /// Release one reference. The handle must not be used afterwards.
+    pub fn release(self: Capability) void {
+        switch (self) {
+            .local => |entry| entry.connection.releaseLocal(entry),
+            .imported => |entry| entry.connection.releaseImport(entry),
+            .promised => |entry| entry.connection.releasePromiseHandle(entry),
+            .promised_answer => |entry| entry.connection.releaseAnswerCapability(entry),
+            .none => {},
+        }
+    }
 
     pub fn beginCall(self: Capability, interface_id: u64, method_id: u16) !Request {
         return switch (self) {
-            .imported => |capability| capability.connection.beginCall(self, interface_id, method_id),
-            .promised_answer => |capability| capability.connection.beginPipelinedCall(self, interface_id, method_id),
-            .local, .promised => error.LocalTargetUnsupported,
+            .local => |entry| entry.connection.beginLocalCall(entry, interface_id, method_id),
+            .imported => |entry| entry.connection.beginImportCall(entry, interface_id, method_id),
+            .promised => |entry| entry.connection.beginPromiseCall(entry, interface_id, method_id),
+            .promised_answer => |entry| entry.connection.beginPipelinedCall(entry, interface_id, method_id),
             .none => error.NoCapability,
         };
     }
 };
 
+fn isNone(capability: Capability) bool {
+    return switch (capability) {
+        .none => true,
+        else => false,
+    };
+}
+
 pub const Response = struct {
     message: capnp.Message,
     connection: *Connection,
+    allocator: std.mem.Allocator,
+    question: ?*QuestionRef = null,
+    caps_taken: bool = false,
+    /// One flag per result cap-table entry, set when the entry has been
+    /// decoded. Used to release result capabilities the caller did not take.
+    taken_caps: ?[]bool = null,
+    /// Owned capabilities for in-process (local) calls, indexed like the cap
+    /// table. Released by `deinit`.
+    local_caps: ?[]Capability = null,
 
-    pub fn fromBytes(bytes: []const u8, allocator: std.mem.Allocator, connection: *Connection) !Response {
-        const message = try capnp.Message.fromBytes(bytes, allocator);
-        return .{ .message = message, .connection = connection };
+    pub fn fromBytes(bytes: []const u8, connection: *Connection) !Response {
+        const message = try capnp.Message.fromBytes(bytes, connection.allocator);
+        return .{
+            .message = message,
+            .connection = connection,
+            .allocator = connection.allocator,
+        };
     }
 
-    pub fn deinit(self: *Response, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *Response) void {
+        const allocator = self.allocator;
+        if (self.taken_caps != null) self.releaseUntakenCaps();
         self.message.deinit(allocator);
+        if (self.taken_caps) |flags| {
+            allocator.free(flags);
+            self.taken_caps = null;
+        }
+        if (self.local_caps) |caps| {
+            for (caps) |handle| handle.release();
+            allocator.free(caps);
+            self.local_caps = null;
+        }
+        if (self.question) |question| {
+            question.caps_taken = question.caps_taken or self.caps_taken;
+            self.question = null;
+            question.release();
+        }
+    }
+
+    fn markTaken(self: *Response, cap_count: u29, index: u32) !void {
+        if (self.taken_caps == null) {
+            const flags = try self.allocator.alloc(bool, @intCast(cap_count));
+            @memset(flags, false);
+            self.taken_caps = flags;
+        }
+        self.taken_caps.?[index] = true;
+    }
+
+    /// Finish was sent with `releaseResultCaps = false` because at least one
+    /// result capability was taken. Release the exports that were not taken.
+    fn releaseUntakenCaps(self: *Response) void {
+        const result_payload = self.payload() catch return;
+        const cap_table = result_payload.capTable() catch return;
+        const flags = self.taken_caps.?;
+        for (0..cap_table.length) |i| {
+            if (i < flags.len and flags[i]) continue;
+            const descriptor = cap_table.get(@intCast(i));
+            if (descriptor.senderHosted()) |export_id| {
+                self.connection.sendRelease(export_id, 1) catch |err| self.connection.noteError(err);
+            } else if (descriptor.senderPromise()) |export_id| {
+                self.connection.sendRelease(export_id, 1) catch |err| self.connection.noteError(err);
+            }
+        }
     }
 
     pub fn returnReader(self: *Response) !rpc.Return.Reader {
@@ -161,11 +331,29 @@ pub const Response = struct {
         return content.asStruct(T, trait);
     }
 
+    /// Decode a capability from the result cap table. The returned handle owns
+    /// one reference and must be released by the caller.
     pub fn capability(self: *Response, index: u32) !Capability {
+        if (self.local_caps) |caps| {
+            if (index >= caps.len) return error.InvalidCapability;
+            return caps[index].retain();
+        }
         const result_payload = try self.payload();
         const cap_table = try result_payload.capTable();
         if (index >= cap_table.length) return error.InvalidCapability;
-        return self.connection.decodeCapability(cap_table.get(index));
+        if (self.taken_caps) |flags| {
+            if (index < flags.len and flags[index]) return error.CapabilityAlreadyTaken;
+        }
+        const handle = try self.connection.decodeCapability(cap_table.get(index));
+        if (!isNone(handle)) {
+            self.markTaken(cap_table.length, index) catch |err| {
+                handle.release();
+                return err;
+            };
+            self.caps_taken = true;
+            if (self.question) |question| question.caps_taken = true;
+        }
+        return handle;
     }
 
     pub fn exception(self: *Response) !?rpc.Exception.Reader {
@@ -179,13 +367,16 @@ pub const Request = struct {
     message: *capnp.MessageBuilder,
     call: rpc.Call.Builder,
     question_id: u32,
+    question: ?*QuestionRef = null,
     caps: std.ArrayList(Capability) = .empty,
     caps_deinitialized: bool = false,
     sent: bool = false,
     params_builder: ?rpc.Payload.Builder = null,
-    local_target: ?LocalCapability = null,
+    local_target: ?*LocalEntry = null,
+    target: Capability = .none,
 
     pub fn params(self: *Request) !rpc.Payload.Builder {
+        if (self.sent) return error.AlreadySent;
         // Building the params field again would allocate a fresh Payload and
         // discard any content or cap table already written to it, so cache the
         // builder for the lifetime of the request.
@@ -201,17 +392,38 @@ pub const Request = struct {
     }
 
     /// Add a capability to the params cap table and return its index.
+    /// The argument is borrowed; the request retains it until `deinit`.
     pub fn addCapability(self: *Request, capability: Capability) !u32 {
         if (self.sent) return error.AlreadySent;
         const index: u32 = @intCast(self.caps.items.len);
-        try self.caps.append(self.connection.allocator, capability);
+        try self.caps.append(self.connection.allocator, capability.retain());
         return index;
+    }
+
+    /// Convenience for the common case of passing a local capability.
+    pub fn addLocalCapability(self: *Request, capability: LocalCapability) !u32 {
+        const handle = try self.connection.initLocal(capability);
+        defer handle.release();
+        return self.addCapability(handle);
     }
 
     fn deinitCaps(self: *Request) void {
         if (self.caps_deinitialized) return;
+        for (self.caps.items) |capability| capability.release();
         self.caps.deinit(self.connection.allocator);
         self.caps_deinitialized = true;
+    }
+
+    fn releaseTarget(self: *Request) void {
+        self.target.release();
+        self.target = .none;
+    }
+
+    fn discardQuestion(self: *Request) void {
+        if (self.question) |question| {
+            self.question = null;
+            self.connection.destroyQuestion(question);
+        }
     }
 
     fn encodeCaps(self: *Request) !void {
@@ -220,7 +432,12 @@ pub const Request = struct {
         var cap_table = try payload.capTable();
         try cap_table.init(@intCast(self.caps.items.len));
         for (self.caps.items, 0..) |capability, i| {
-            try self.connection.encodeCapability(capability, cap_table.get(@intCast(i)));
+            const export_id = try self.connection.encodeCapability(capability, cap_table.get(@intCast(i)));
+            if (export_id) |id| {
+                if (self.question) |question| {
+                    try question.param_export_ids.append(self.connection.allocator, id);
+                }
+            }
         }
     }
 
@@ -244,13 +461,19 @@ pub const Request = struct {
         self.deinitCaps();
         self.sent = true;
 
-        return .{ .connection = self.connection, .question_id = self.question_id };
+        const question = self.question orelse return error.MissingQuestion;
+        self.question = null;
+        self.releaseTarget();
+
+        return .{ .connection = self.connection, .question = question };
     }
 
-    fn startLocal(self: *Request, local: LocalCapability) !Promise {
+    fn startLocal(self: *Request, local: *LocalEntry) !Promise {
         const allocator = self.connection.allocator;
 
-        try self.encodeCaps();
+        // Local calls never go over the wire, so the params' capability
+        // pointers should reference the request's handles directly rather than
+        // being exported and then decoded as imports of ourselves.
 
         const request_bytes = try self.message.toBytes(allocator);
         defer allocator.free(request_bytes);
@@ -262,22 +485,43 @@ pub const Request = struct {
         const call = (try root.call()) orelse return error.InvalidMessage;
 
         var return_bytes: ?[]u8 = null;
-        try self.connection.dispatchLocalCall(call, local, self.question_id, &return_bytes);
+        var local_caps = std.ArrayList(Capability).empty;
+        errdefer {
+            for (local_caps.items) |capability| capability.release();
+            local_caps.deinit(allocator);
+        }
+        try self.connection.dispatchLocalCall(
+            call,
+            local.capability,
+            self.question_id,
+            &return_bytes,
+            &local_caps,
+            self.caps.items,
+        );
         const bytes = return_bytes.?;
         defer allocator.free(bytes);
 
-        const response = try Response.fromBytes(bytes, allocator, self.connection);
+        var response = try Response.fromBytes(bytes, self.connection);
+        response.local_caps = local_caps.toOwnedSlice(allocator) catch |err| {
+            response.deinit();
+            return err;
+        };
 
         self.message.deinit();
         allocator.destroy(self.message);
         self.deinitCaps();
         self.sent = true;
+        self.releaseTarget();
 
-        if (self.connection.dispatch_depth == 0) try self.connection.drainDeferredCalls();
+        if (self.connection.dispatch_depth == 0) {
+            self.connection.drainDeferredCalls() catch |err| {
+                response.deinit();
+                return err;
+            };
+        }
 
         return .{
             .connection = self.connection,
-            .question_id = self.question_id,
             .local_response = response,
         };
     }
@@ -289,6 +533,8 @@ pub const Request = struct {
 
     pub fn deinit(self: *Request) void {
         self.deinitCaps();
+        self.releaseTarget();
+        self.discardQuestion();
         if (self.sent) return;
         self.message.deinit();
         self.connection.allocator.destroy(self.message);
@@ -298,9 +544,24 @@ pub const Request = struct {
 
 pub const Promise = struct {
     connection: *Connection,
-    question_id: u32,
+    question: ?*QuestionRef = null,
     finished: bool = false,
     local_response: ?Response = null,
+
+    /// Release this promise without waiting for its Return, canceling the
+    /// call if it is still outstanding.
+    pub fn deinit(self: *Promise) void {
+        if (self.finished) return;
+        if (self.local_response) |*response| {
+            response.deinit();
+            self.local_response = null;
+        }
+        if (self.question) |question| {
+            self.question = null;
+            question.release();
+        }
+        self.finished = true;
+    }
 
     pub fn wait(self: *Promise) !Response {
         if (self.finished) return error.AlreadyFinished;
@@ -309,9 +570,10 @@ pub const Promise = struct {
             self.finished = true;
             return response;
         }
-        var response = try self.connection.waitReturn(self.question_id);
-        errdefer response.deinit(self.connection.allocator);
-        try self.connection.sendFinish(self.question_id, true);
+        const question = self.question orelse return error.AlreadyFinished;
+        var response = try self.connection.waitReturn(question.id);
+        response.question = question;
+        self.question = null;
         self.finished = true;
         return response;
     }
@@ -325,63 +587,91 @@ pub const Promise = struct {
             self.finished = true;
             return response;
         }
-        const response = (try self.connection.takeReturn(self.question_id)) orelse return null;
+        const question = self.question orelse return error.AlreadyFinished;
+        const response = (try self.connection.takeReturn(question.id)) orelse return null;
         var result = response;
-        errdefer result.deinit(self.connection.allocator);
-        try self.connection.sendFinish(self.question_id, true);
+        result.question = question;
+        self.question = null;
         self.finished = true;
         return result;
     }
 
     /// Return a capability handle addressing the root result, or a pointer
-    /// field within the result struct.
-    pub fn capability(self: Promise, pointer_field: ?u16) !Capability {
+    /// field within the result struct. The caller owns the handle.
+    pub fn capability(self: *Promise, pointer_field: ?u16) !Capability {
         if (self.finished) return error.AlreadyFinished;
         if (self.local_response != null) return error.LocalPipeliningUnsupported;
-        return .{ .promised_answer = .{
-            .connection = self.connection,
-            .question_id = self.question_id,
-            .pointer_field = pointer_field,
-        } };
+        const question = self.question orelse return error.AlreadyFinished;
+        return self.connection.newAnswerCapability(question, pointer_field);
     }
 };
 
 pub const BootstrapPromise = struct {
     connection: *Connection,
-    question_id: u32,
+    question: ?*QuestionRef = null,
     finished: bool = false,
+
+    /// Release this bootstrap request without waiting for its Return.
+    pub fn deinit(self: *BootstrapPromise) void {
+        if (self.finished) return;
+        if (self.question) |question| {
+            self.question = null;
+            question.release();
+        }
+        self.finished = true;
+    }
+
+    /// Return a capability handle addressing the bootstrap result. The caller
+    /// owns the handle. As with `Promise.capability`, this can be used to
+    /// pipeline calls before the bootstrap Return arrives.
+    pub fn capability(self: *BootstrapPromise) !Capability {
+        if (self.finished) return error.AlreadyFinished;
+        const question = self.question orelse return error.AlreadyFinished;
+        return self.connection.newAnswerCapability(question, null);
+    }
 
     pub fn wait(self: *BootstrapPromise) !Capability {
         if (self.finished) return error.AlreadyFinished;
-        var response = try self.connection.waitReturn(self.question_id);
-        defer response.deinit(self.connection.allocator);
-        const capability = try self.connection.finishBootstrap(&response, self.question_id);
+        const question = self.question orelse return error.AlreadyFinished;
+        var response = try self.connection.waitReturn(question.id);
+        defer response.deinit();
+
+        const bootstrap_capability = self.connection.finishBootstrap(&response) catch |err| {
+            self.question = null;
+            self.finished = true;
+            question.release();
+            return err;
+        };
+
+        question.caps_taken = !isNone(bootstrap_capability);
+        self.question = null;
         self.finished = true;
-        return capability;
+        question.release();
+        return bootstrap_capability;
     }
 
     /// Non-blocking completion check. The caller is responsible for driving
     /// `Connection.step()` as transport events arrive.
     pub fn tryTake(self: *BootstrapPromise) !?Capability {
         if (self.finished) return error.AlreadyFinished;
-        var response = (try self.connection.takeReturn(self.question_id)) orelse return null;
-        defer response.deinit(self.connection.allocator);
-        const capability = try self.connection.finishBootstrap(&response, self.question_id);
+        const question = self.question orelse return error.AlreadyFinished;
+        const response = (try self.connection.takeReturn(question.id)) orelse return null;
+        var result = response;
+        defer result.deinit();
+
+        const bootstrap_capability = self.connection.finishBootstrap(&result) catch |err| {
+            self.question = null;
+            self.finished = true;
+            question.release();
+            return err;
+        };
+
+        question.caps_taken = !isNone(bootstrap_capability);
+        self.question = null;
         self.finished = true;
-        return capability;
+        question.release();
+        return bootstrap_capability;
     }
-};
-
-const ExportEntry = struct {
-    capability: Capability,
-    ref_count: u32,
-    is_promise: bool = false,
-    pending_calls: std.ArrayList([]u8) = .empty,
-};
-
-const AnswerState = struct {
-    resolved_bytes: ?[]u8 = null,
-    pending: std.ArrayList([]u8) = .empty,
 };
 
 pub const Connection = struct {
@@ -391,54 +681,232 @@ pub const Connection = struct {
     /// the peer so that the blocking `Request.send` path can complete without
     /// an external event loop.
     peer: ?*Connection = null,
-    bootstrap_capability: ?Capability = null,
+    bootstrap_capability: Capability = .none,
     disembargo_callback: ?DisembargoCallback = null,
     next_question_id: u32 = 1,
-    next_export_id: u32 = 0,
+    next_export_id: u32 = 1,
     returns: std.AutoHashMap(u32, []u8),
-    exports: std.AutoHashMap(u32, ExportEntry),
-    imports: std.AutoHashMap(u32, u32),
+    exports: std.AutoHashMap(u32, *ExportEntry),
+    imports: std.AutoHashMap(u32, *ImportEntry),
+    locals: std.HashMap(LocalKey, *LocalEntry, LocalKeyContext, std.hash_map.default_max_load_percentage),
     answers: std.AutoHashMap(u32, AnswerState),
+    questions: std.AutoHashMap(u32, *QuestionRef),
+    queued_questions: std.AutoHashMap(u32, void),
+    answer_capabilities: std.ArrayList(*AnswerCapability) = .empty,
     dispatch_depth: usize = 0,
-    deferred_calls: std.ArrayList([]u8) = .empty,
+    deferred_calls: std.ArrayList(PendingCall) = .empty,
     draining: bool = false,
+    pending_error: ?anyerror = null,
+    closing: bool = false,
+    closed: bool = false,
 
-    pub fn init(allocator: std.mem.Allocator, transport: Transport) !Connection {
-        return .{
+    pub fn init(allocator: std.mem.Allocator, transport_value: Transport) !*Connection {
+        const self = try allocator.create(Connection);
+        errdefer allocator.destroy(self);
+        self.* = .{
             .allocator = allocator,
-            .transport = transport,
+            .transport = transport_value,
             .returns = std.AutoHashMap(u32, []u8).init(allocator),
-            .exports = std.AutoHashMap(u32, ExportEntry).init(allocator),
-            .imports = std.AutoHashMap(u32, u32).init(allocator),
+            .exports = std.AutoHashMap(u32, *ExportEntry).init(allocator),
+            .imports = std.AutoHashMap(u32, *ImportEntry).init(allocator),
+            .locals = std.HashMap(LocalKey, *LocalEntry, LocalKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
             .answers = std.AutoHashMap(u32, AnswerState).init(allocator),
+            .questions = std.AutoHashMap(u32, *QuestionRef).init(allocator),
+            .queued_questions = std.AutoHashMap(u32, void).init(allocator),
         };
+        return self;
+    }
+
+    pub fn fd(self: *Connection) std.posix.fd_t {
+        return self.transport.fd();
+    }
+
+    pub fn wantsWrite(self: *Connection) bool {
+        return self.transport.wantsWrite();
+    }
+
+    pub fn isClosed(self: *Connection) bool {
+        return self.transport.isClosed();
     }
 
     pub fn deinit(self: *Connection) void {
+        const allocator = self.allocator;
+        if (self.peer) |peer| {
+            // Keep the peer from retaining a pointer to freed connection state.
+            if (peer.peer == self) peer.peer = null;
+        }
+        self.closing = true;
+        self.bootstrap_capability.release();
+        self.bootstrap_capability = .none;
+
         var return_it = self.returns.valueIterator();
         while (return_it.next()) |bytes| self.allocator.free(bytes.*);
         self.returns.deinit();
 
-        var export_it = self.exports.valueIterator();
-        while (export_it.next()) |entry| {
-            for (entry.pending_calls.items) |bytes| self.allocator.free(bytes);
-            entry.pending_calls.deinit(self.allocator);
+        // Answer-held capabilities may reference imports, exports, or questions,
+        // so release them before tearing those tables down.
+        while (self.answers.count() != 0) {
+            var answer_it = self.answers.iterator();
+            const question_id = answer_it.next().?.key_ptr.*;
+            var answer = self.answers.fetchRemove(question_id).?.value;
+            for (answer.held_caps.items) |capability| capability.release();
+            answer.held_caps.deinit(self.allocator);
+            if (answer.resolved_bytes) |bytes| self.allocator.free(bytes);
+            for (answer.pending.items) |item| {
+                _ = self.queued_questions.remove(item.question_id);
+                self.allocator.free(item.bytes);
+            }
+            answer.pending.deinit(self.allocator);
+            answer.export_ids.deinit(self.allocator);
+        }
+        self.answers.deinit();
+
+        // Remove each entry before destroying it: releasing a capability may
+        // recursively destroy another export or import, and hash maps must not
+        // be mutated while they are being iterated.
+        while (self.exports.count() != 0) {
+            var export_it = self.exports.valueIterator();
+            const entry = export_it.next().?.*;
+            _ = self.exports.remove(entry.export_id);
+            self.destroyExport(entry);
         }
         self.exports.deinit();
 
-        var answer_it = self.answers.valueIterator();
-        while (answer_it.next()) |answer| {
-            if (answer.resolved_bytes) |bytes| self.allocator.free(bytes);
-            for (answer.pending.items) |bytes| self.allocator.free(bytes);
-            answer.pending.deinit(self.allocator);
+        while (self.imports.count() != 0) {
+            var import_it = self.imports.valueIterator();
+            const entry = import_it.next().?.*;
+            _ = self.imports.remove(entry.export_id);
+            self.destroyImport(entry);
         }
-        self.answers.deinit();
-        for (self.deferred_calls.items) |bytes| self.allocator.free(bytes);
-        self.deferred_calls.deinit(self.allocator);
         self.imports.deinit();
+
+        while (self.answer_capabilities.items.len != 0) {
+            const entry = self.answer_capabilities.pop().?;
+            if (entry.question) |question| {
+                std.debug.assert(question.refs > 0);
+                question.refs -= 1;
+            }
+            self.allocator.destroy(entry);
+        }
+        self.answer_capabilities.deinit(self.allocator);
+
+        while (self.questions.count() != 0) {
+            var question_it = self.questions.valueIterator();
+            const question = question_it.next().?.*;
+            _ = self.questions.remove(question.id);
+            self.allocator.destroy(question);
+        }
+        self.questions.deinit();
+        self.queued_questions.deinit();
+
+        self.destroyRemainingLocals();
+
+        for (self.deferred_calls.items) |item| self.allocator.free(item.bytes);
+        self.deferred_calls.deinit(self.allocator);
+
+        self.closed = true;
+        allocator.destroy(self);
+    }
+
+    fn destroyRemainingLocals(self: *Connection) void {
+        while (self.locals.count() != 0) {
+            var it = self.locals.valueIterator();
+            const entry = it.next().?.*;
+            _ = self.locals.remove(entry.key);
+            if (entry.capability.destroy) |destroy| destroy(dispatchContext(entry.capability.context));
+            self.allocator.destroy(entry);
+        }
+        self.locals.deinit();
+    }
+
+    fn destroyExport(self: *Connection, entry: *ExportEntry) void {
+        switch (entry.capability) {
+            .local => |local| {
+                if (local.export_id == entry.export_id) local.export_id = null;
+            },
+            else => {},
+        }
+        if (!isNone(entry.capability)) entry.capability.release();
+        for (entry.pending_calls.items) |item| {
+            _ = self.queued_questions.remove(item.question_id);
+            self.allocator.free(item.bytes);
+        }
+        entry.pending_calls.deinit(self.allocator);
+        self.allocator.destroy(entry);
+    }
+
+    fn destroyImport(self: *Connection, entry: *ImportEntry) void {
+        if (!isNone(entry.resolved)) entry.resolved.release();
+        self.allocator.destroy(entry);
+    }
+
+    fn destroyQuestion(self: *Connection, question: *QuestionRef) void {
+        if (self.questions.get(question.id) == question) {
+            _ = self.questions.remove(question.id);
+        }
+        if (self.returns.fetchRemove(question.id)) |removed| {
+            self.allocator.free(removed.value);
+        }
+        question.param_export_ids.deinit(self.allocator);
+        self.allocator.destroy(question);
+    }
+
+    fn finishQuestion(self: *Connection, question: *QuestionRef) void {
+        if (!question.finish_sent) {
+            question.finish_sent = true;
+            if (!self.closing) {
+                self.sendFinish(question.id, !question.caps_taken) catch |err| self.noteError(err);
+            }
+        }
+        self.destroyQuestion(question);
+    }
+
+    fn noteError(self: *Connection, err: anyerror) void {
+        if (self.pending_error == null) self.pending_error = err;
+    }
+
+    /// Create an owned handle for a local capability. Descriptors with the same
+    /// context, interface id, and dispatch function share one `LocalEntry`.
+    pub fn initLocal(self: *Connection, capability: LocalCapability) !Capability {
+        const key = LocalKey{
+            .context = if (capability.context) |ptr| @intFromPtr(ptr) else 0,
+            .interface_id = capability.interface_id,
+            .dispatch = @intFromPtr(capability.dispatch),
+        };
+
+        if (self.locals.get(key)) |entry| {
+            entry.refs += 1;
+            if (entry.capability.destroy == null) entry.capability.destroy = capability.destroy;
+            return .{ .local = entry };
+        }
+
+        const entry = try self.allocator.create(LocalEntry);
+        errdefer self.allocator.destroy(entry);
+        entry.* = .{
+            .connection = self,
+            .key = key,
+            .capability = capability,
+            .refs = 1,
+        };
+        try self.locals.put(key, entry);
+        return .{ .local = entry };
+    }
+
+    fn releaseLocal(self: *Connection, entry: *LocalEntry) void {
+        std.debug.assert(entry.refs > 0);
+        entry.refs -= 1;
+        if (entry.refs != 0) return;
+
+        std.debug.assert(entry.export_id == null);
+        if (self.locals.get(entry.key) == entry) {
+            _ = self.locals.remove(entry.key);
+        }
+        if (entry.capability.destroy) |destroy| destroy(dispatchContext(entry.capability.context));
+        self.allocator.destroy(entry);
     }
 
     pub fn setBootstrap(self: *Connection, capability: Capability) void {
+        if (!isNone(self.bootstrap_capability)) self.bootstrap_capability.release();
         self.bootstrap_capability = capability;
     }
 
@@ -449,6 +917,10 @@ pub const Connection = struct {
     /// Process all currently available messages and flush buffered output.
     /// This never waits for the transport.
     pub fn step(self: *Connection) !void {
+        if (self.pending_error) |err| {
+            self.pending_error = null;
+            return err;
+        }
         while (try self.transport.receive(self.allocator)) |bytes| {
             defer self.allocator.free(bytes);
             try self.handle(bytes);
@@ -457,14 +929,10 @@ pub const Connection = struct {
         try self.transport.flush();
     }
 
-    /// Kept as a non-blocking alias for `step`.
-    pub fn pump(self: *Connection) !void {
-        return self.step();
-    }
-
     fn waitForProgress(self: *Connection) !void {
         if (self.transport.fd() < 0) {
-            if (self.peer) |peer| try peer.step();
+            const peer = self.peer orelse return error.NoWaitSource;
+            try peer.step();
             try self.step();
             return;
         }
@@ -482,7 +950,8 @@ pub const Connection = struct {
     }
 
     pub fn bootstrapStart(self: *Connection) !BootstrapPromise {
-        const question_id = self.allocQuestionId();
+        const question = try self.newQuestion();
+        errdefer self.destroyQuestion(question);
 
         var message = capnp.MessageBuilder{ .allocator = self.allocator };
         try message.init();
@@ -490,13 +959,13 @@ pub const Connection = struct {
 
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
         var bootstrap_message = try root.setBootstrap();
-        bootstrap_message.setQuestionId(question_id);
+        bootstrap_message.setQuestionId(question.id);
 
         const bytes = try message.toBytes(self.allocator);
         defer self.allocator.free(bytes);
 
         try self.sendRaw(bytes);
-        return .{ .connection = self, .question_id = question_id };
+        return .{ .connection = self, .question = question };
     }
 
     pub fn bootstrap(self: *Connection) !Capability {
@@ -504,74 +973,75 @@ pub const Connection = struct {
         return promise.wait();
     }
 
-    fn finishBootstrap(
-        self: *Connection,
-        response: *Response,
-        question_id: u32,
-    ) !Capability {
+    fn finishBootstrap(self: *Connection, response: *Response) !Capability {
+        _ = self;
         switch (try response.which()) {
             .results => {
                 const payload = try response.payload();
                 const content = try payload.content();
                 const cap_index = try content.asCapability();
-                const cap_table = try payload.capTable();
-                if (cap_index >= cap_table.length) return error.InvalidCapability;
-
-                const descriptor = cap_table.get(cap_index);
-                const export_id = descriptor.senderHosted() orelse return error.InvalidCapability;
-                try self.registerImport(export_id);
-
-                try self.sendFinish(question_id, false);
-                return .{ .imported = .{ .connection = self, .export_id = export_id } };
+                return response.capability(cap_index);
             },
-            .exception => {
-                try self.sendFinish(question_id, true);
-                return error.RemoteException;
-            },
-            else => {
-                try self.sendFinish(question_id, true);
-                return error.InvalidReturn;
-            },
+            .exception => return error.RemoteException,
+            else => return error.InvalidReturn,
         }
     }
 
     pub fn newPromise(self: *Connection) !Capability {
         const export_id = self.allocExportId();
-        const capability: Capability = .{ .promised = .{
+        const entry = try self.allocator.create(ExportEntry);
+        errdefer self.allocator.destroy(entry);
+        entry.* = .{
             .connection = self,
             .export_id = export_id,
-        } };
-        try self.exports.put(export_id, .{
-            .capability = capability,
-            .ref_count = 1,
+            .capability = .none,
+            .wire_refs = 0,
+            .handle_refs = 1,
             .is_promise = true,
-        });
-        return capability;
+        };
+        try self.exports.put(export_id, entry);
+        return .{ .promised = entry };
     }
 
     pub fn resolvePromise(self: *Connection, promise: Capability, target: Capability) !void {
-        const promised = switch (promise) {
+        const entry = switch (promise) {
             .promised => |value| value,
             else => return error.NotPromise,
         };
-        if (promised.connection != self) return error.WrongConnection;
-
-        const entry = self.exports.getPtr(promised.export_id) orelse return error.UnknownCapability;
+        if (entry.connection != self) return error.WrongConnection;
         if (!entry.is_promise) return error.NotPromise;
+
         entry.is_promise = false;
-        entry.capability = target;
+        const previous = entry.capability;
+        entry.capability = target.retain();
+        if (!isNone(previous)) previous.release();
 
         var pending = entry.pending_calls;
         entry.pending_calls = .empty;
         defer {
-            for (pending.items) |bytes| self.allocator.free(bytes);
+            for (pending.items) |item| self.allocator.free(item.bytes);
             pending.deinit(self.allocator);
         }
-        try self.sendResolve(promised.export_id, target);
 
-        for (pending.items) |bytes| {
-            try self.handle(bytes);
+        self.sendResolve(entry.export_id, target) catch |err| {
+            // The peer will never forward these calls now. Report the failure
+            // for each queued call instead of leaving its caller blocked.
+            for (pending.items) |item| {
+                _ = self.queued_questions.remove(item.question_id);
+                self.sendException(item.question_id, err, true) catch {};
+            }
+            self.maybeDestroyExport(entry);
+            return err;
+        };
+
+        for (pending.items) |item| {
+            _ = self.queued_questions.remove(item.question_id);
+            self.handle(item.bytes) catch |err| {
+                self.sendException(item.question_id, err, true) catch {};
+            };
         }
+
+        self.maybeDestroyExport(entry);
     }
 
     pub fn beginCall(
@@ -579,18 +1049,39 @@ pub const Connection = struct {
         target: Capability,
         interface_id: u64,
         method_id: u16,
-    ) !Request {
-        if (target == .local) return self.beginLocalCall(target.local, interface_id, method_id);
-
-        const imported = switch (target) {
-            .imported => |capability| capability,
-            .promised_answer => return self.beginPipelinedCall(target, interface_id, method_id),
-            .local, .promised => return error.LocalTargetUnsupported,
-            .none => return error.NoCapability,
+    ) anyerror!Request {
+        return switch (target) {
+            .local => |entry| self.beginLocalCall(entry, interface_id, method_id),
+            .imported => |entry| self.beginImportCall(entry, interface_id, method_id),
+            .promised => |entry| self.beginPromiseCall(entry, interface_id, method_id),
+            .promised_answer => |entry| self.beginPipelinedCall(entry, interface_id, method_id),
+            .none => error.NoCapability,
         };
-        if (imported.connection != self) return error.WrongConnection;
+    }
 
-        const question_id = self.allocQuestionId();
+    fn beginPromiseCall(
+        self: *Connection,
+        entry: *ExportEntry,
+        interface_id: u64,
+        method_id: u16,
+    ) !Request {
+        if (entry.connection != self) return error.WrongConnection;
+        if (entry.is_promise) return error.LocalTargetUnsupported;
+        return self.beginCall(entry.capability, interface_id, method_id);
+    }
+
+    fn beginImportCall(
+        self: *Connection,
+        entry: *ImportEntry,
+        interface_id: u64,
+        method_id: u16,
+    ) !Request {
+        if (entry.connection != self) return error.WrongConnection;
+        if (self.imports.get(entry.export_id) != entry) return error.UnknownCapability;
+
+        const question = try self.newQuestion();
+        errdefer self.destroyQuestion(question);
+
         const message = try self.allocator.create(capnp.MessageBuilder);
         errdefer self.allocator.destroy(message);
         message.* = .{ .allocator = self.allocator };
@@ -599,27 +1090,31 @@ pub const Connection = struct {
 
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
         var call = try root.setCall();
-        call.setQuestionId(question_id);
+        call.setQuestionId(question.id);
 
         var message_target = try call.target();
-        message_target.setImportedCap(imported.export_id);
+        message_target.setImportedCap(entry.export_id);
         call.setInterfaceId(interface_id);
         call.setMethodId(method_id);
 
+        const retained_target: Capability = .{ .imported = entry };
         return .{
             .connection = self,
             .message = message,
             .call = call,
-            .question_id = question_id,
+            .question_id = question.id,
+            .question = question,
+            .target = retained_target.retain(),
         };
     }
 
-    pub fn beginLocalCall(
+    fn beginLocalCall(
         self: *Connection,
-        local: LocalCapability,
+        entry: *LocalEntry,
         interface_id: u64,
         method_id: u16,
     ) !Request {
+        if (entry.connection != self) return error.WrongConnection;
         const question_id = self.allocQuestionId();
         const message = try self.allocator.create(capnp.MessageBuilder);
         errdefer self.allocator.destroy(message);
@@ -633,28 +1128,28 @@ pub const Connection = struct {
         call.setInterfaceId(interface_id);
         call.setMethodId(method_id);
 
+        const retained_target: Capability = .{ .local = entry };
         return .{
             .connection = self,
             .message = message,
             .call = call,
             .question_id = question_id,
-            .local_target = local,
+            .local_target = entry,
+            .target = retained_target.retain(),
         };
     }
 
-    pub fn beginPipelinedCall(
+    fn beginPipelinedCall(
         self: *Connection,
-        target: Capability,
+        entry: *AnswerCapability,
         interface_id: u64,
         method_id: u16,
     ) !Request {
-        const promised = switch (target) {
-            .promised_answer => |capability| capability,
-            else => return error.NotPromisedAnswer,
-        };
-        if (promised.connection != self) return error.WrongConnection;
+        if (entry.connection != self) return error.WrongConnection;
 
-        const question_id = self.allocQuestionId();
+        const question = try self.newQuestion();
+        errdefer self.destroyQuestion(question);
+
         const message = try self.allocator.create(capnp.MessageBuilder);
         errdefer self.allocator.destroy(message);
         message.* = .{ .allocator = self.allocator };
@@ -663,12 +1158,12 @@ pub const Connection = struct {
 
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
         var call = try root.setCall();
-        call.setQuestionId(question_id);
+        call.setQuestionId(question.id);
 
         var message_target = try call.target();
         var promised_answer = try message_target.setPromisedAnswer();
-        promised_answer.setQuestionId(promised.question_id);
-        if (promised.pointer_field) |pointer_field| {
+        promised_answer.setQuestionId(entry.question_id);
+        if (entry.pointer_field) |pointer_field| {
             var transform = try promised_answer.transform();
             try transform.init(1);
             transform.get(0).setGetPointerField(pointer_field);
@@ -677,12 +1172,78 @@ pub const Connection = struct {
         call.setInterfaceId(interface_id);
         call.setMethodId(method_id);
 
+        const retained_target: Capability = .{ .promised_answer = entry };
         return .{
             .connection = self,
             .message = message,
             .call = call,
-            .question_id = question_id,
+            .question_id = question.id,
+            .question = question,
+            .target = retained_target.retain(),
         };
+    }
+
+    fn newQuestion(self: *Connection) !*QuestionRef {
+        const id = self.allocQuestionId();
+        const question = try self.allocator.create(QuestionRef);
+        errdefer self.allocator.destroy(question);
+        question.* = .{
+            .connection = self,
+            .id = id,
+            .refs = 1,
+        };
+        try self.questions.put(id, question);
+        return question;
+    }
+
+    fn newAnswerCapability(
+        self: *Connection,
+        question: *QuestionRef,
+        pointer_field: ?u16,
+    ) !Capability {
+        const entry = try self.allocator.create(AnswerCapability);
+        errdefer self.allocator.destroy(entry);
+        entry.* = .{
+            .connection = self,
+            .question_id = question.id,
+            .pointer_field = pointer_field,
+            .question = question.retain(),
+            .refs = 1,
+        };
+        try self.answer_capabilities.append(self.allocator, entry);
+        return .{ .promised_answer = entry };
+    }
+
+    fn newUnresolvedAnswerCapability(
+        self: *Connection,
+        question_id: u32,
+        pointer_field: ?u16,
+    ) !Capability {
+        const entry = try self.allocator.create(AnswerCapability);
+        errdefer self.allocator.destroy(entry);
+        entry.* = .{
+            .connection = self,
+            .question_id = question_id,
+            .pointer_field = pointer_field,
+            .question = null,
+            .refs = 1,
+        };
+        try self.answer_capabilities.append(self.allocator, entry);
+        return .{ .promised_answer = entry };
+    }
+
+    fn releaseAnswerCapability(self: *Connection, entry: *AnswerCapability) void {
+        std.debug.assert(entry.refs > 0);
+        entry.refs -= 1;
+        if (entry.refs != 0) return;
+        for (self.answer_capabilities.items, 0..) |item, i| {
+            if (item == entry) {
+                _ = self.answer_capabilities.swapRemove(i);
+                break;
+            }
+        }
+        if (entry.question) |question| question.release();
+        self.allocator.destroy(entry);
     }
 
     fn sendRaw(self: *Connection, bytes: []const u8) anyerror!void {
@@ -708,7 +1269,7 @@ pub const Connection = struct {
     fn takeReturn(self: *Connection, question_id: u32) !?Response {
         const entry = self.returns.fetchRemove(question_id) orelse return null;
         defer self.allocator.free(entry.value);
-        return try Response.fromBytes(entry.value, self.allocator, self);
+        return try Response.fromBytes(entry.value, self);
     }
 
     fn sendFinish(self: *Connection, question_id: u32, release_result_caps: bool) !void {
@@ -737,13 +1298,16 @@ pub const Connection = struct {
                 try self.handleBootstrap(bootstrap_message);
             },
             .call => {
+                const call = (try root.call()) orelse return error.InvalidMessage;
                 if (self.dispatch_depth != 0) {
                     const copy = try self.allocator.dupe(u8, bytes);
                     errdefer self.allocator.free(copy);
-                    try self.deferred_calls.append(self.allocator, copy);
+                    try self.deferred_calls.append(self.allocator, .{
+                        .question_id = call.questionId(),
+                        .bytes = copy,
+                    });
                     return;
                 }
-                const call = (try root.call()) orelse return error.InvalidMessage;
                 try self.handleCall(call, bytes);
             },
             .@"return" => {
@@ -754,7 +1318,10 @@ pub const Connection = struct {
                 const finish = (try root.finish()) orelse return error.InvalidMessage;
                 try self.handleFinish(finish);
             },
-            .resolve => {},
+            .resolve => {
+                const resolve = (try root.resolve()) orelse return error.InvalidMessage;
+                try self.handleResolve(resolve);
+            },
             .disembargo => {
                 const disembargo = (try root.disembargo()) orelse return error.InvalidMessage;
                 try self.handleDisembargo(disembargo);
@@ -770,12 +1337,22 @@ pub const Connection = struct {
 
     fn handleBootstrap(self: *Connection, bootstrap_message: rpc.Bootstrap.Reader) !void {
         const question_id = bootstrap_message.questionId();
-        const capability = self.bootstrap_capability orelse {
-            try self.sendException(question_id, error.NoBootstrapInterface);
+        if (self.answers.contains(question_id) or self.queued_questions.contains(question_id)) {
+            try self.sendException(question_id, error.DuplicateQuestion, true);
             return;
-        };
+        }
+        if (isNone(self.bootstrap_capability)) {
+            try self.sendException(question_id, error.NoBootstrapInterface, true);
+            return;
+        }
 
-        const export_id = try self.allocExport(capability);
+        const export_id = switch (self.bootstrap_capability) {
+            .local => |entry| try self.exportLocal(entry),
+            else => {
+                try self.sendException(question_id, error.UnsupportedBootstrapCapability, true);
+                return;
+            },
+        };
 
         var message = capnp.MessageBuilder{ .allocator = self.allocator };
         try message.init();
@@ -784,6 +1361,7 @@ pub const Connection = struct {
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
         var return_ = try root.setReturn();
         return_.setAnswerId(question_id);
+        return_.setReleaseParamCaps(true);
 
         var results = try return_.setResults();
         results.content().setCapability(0);
@@ -791,6 +1369,9 @@ pub const Connection = struct {
         var cap_table = try results.capTable();
         try cap_table.init(1);
         cap_table.get(0).setSenderHosted(export_id);
+
+        const answer = try self.ensureAnswer(question_id);
+        try answer.export_ids.append(self.allocator, export_id);
 
         const bytes = try message.toBytes(self.allocator);
         defer self.allocator.free(bytes);
@@ -801,6 +1382,10 @@ pub const Connection = struct {
 
     fn handleCall(self: *Connection, call: rpc.Call.Reader, bytes: []const u8) !void {
         const question_id = call.questionId();
+        if (self.answers.contains(question_id) or self.queued_questions.contains(question_id)) {
+            try self.sendException(question_id, error.DuplicateQuestion, true);
+            return;
+        }
         const target = try call.target();
 
         if (try target.promisedAnswer()) |promised| {
@@ -809,39 +1394,41 @@ pub const Connection = struct {
         }
 
         const export_id = target.importedCap() orelse {
-            try self.sendException(question_id, error.UnsupportedTarget);
+            try self.sendException(question_id, error.UnsupportedTarget, true);
             return;
         };
 
-        const entry = self.exports.getPtr(export_id) orelse {
-            try self.sendException(question_id, error.UnknownCapability);
+        const entry = self.exports.get(export_id) orelse {
+            try self.sendException(question_id, error.UnknownCapability, true);
             return;
         };
 
         if (entry.is_promise) {
+            try self.queued_questions.put(question_id, {});
             const copy = try self.allocator.dupe(u8, bytes);
             errdefer self.allocator.free(copy);
-            try entry.pending_calls.append(self.allocator, copy);
+            try entry.pending_calls.append(self.allocator, .{
+                .question_id = question_id,
+                .bytes = copy,
+            });
             return;
         }
 
-        const local = switch (entry.capability) {
-            .local => |cap| cap,
+        switch (entry.capability) {
+            .local => |local| try self.dispatchLocalCall(call, local.capability, question_id, null, null, null),
             .imported => {
-                try self.sendException(question_id, error.ForwardingUnsupported);
+                try self.sendException(question_id, error.ForwardingUnsupported, true);
                 return;
             },
             .promised, .promised_answer => {
-                try self.sendException(question_id, error.UnsupportedTarget);
+                try self.sendException(question_id, error.UnsupportedTarget, true);
                 return;
             },
             .none => {
-                try self.sendException(question_id, error.UnknownCapability);
+                try self.sendException(question_id, error.UnknownCapability, true);
                 return;
             },
-        };
-
-        try self.dispatchLocalCall(call, local, question_id, null);
+        }
     }
 
     fn handlePromisedCall(
@@ -851,26 +1438,34 @@ pub const Connection = struct {
         bytes: []const u8,
     ) !void {
         const answer_id = promised.questionId();
+        const question_id = call.questionId();
         const transform = try promised.transform();
 
-        const entry = try self.answers.getOrPut(answer_id);
-        if (!entry.found_existing) entry.value_ptr.* = .{};
-
-        if (entry.value_ptr.resolved_bytes == null) {
-            const copy = try self.allocator.dupe(u8, bytes);
-            errdefer self.allocator.free(copy);
-            try entry.value_ptr.pending.append(self.allocator, copy);
-            return;
-        }
-
-        const capability = self.resolveAnswerCapability(entry.value_ptr.resolved_bytes.?, transform) catch |err| {
-            try self.sendException(call.questionId(), err);
+        const entry = self.answers.getPtr(answer_id) orelse {
+            try self.sendException(question_id, error.UnknownAnswer, true);
             return;
         };
 
+        if (entry.resolved_bytes == null) {
+            try self.queued_questions.put(question_id, {});
+            const copy = try self.allocator.dupe(u8, bytes);
+            errdefer self.allocator.free(copy);
+            try entry.pending.append(self.allocator, .{
+                .question_id = question_id,
+                .bytes = copy,
+            });
+            return;
+        }
+
+        const capability = self.resolveAnswerCapability(entry.resolved_bytes.?, transform) catch |err| {
+            try self.sendException(question_id, err, true);
+            return;
+        };
+        defer capability.release();
+
         switch (capability) {
-            .local => |local| try self.dispatchLocalCall(call, local, call.questionId(), null),
-            else => try self.sendException(call.questionId(), error.UnsupportedPromisedTarget),
+            .local => |local| try self.dispatchLocalCall(call, local.capability, question_id, null, null, null),
+            else => try self.sendException(question_id, error.UnsupportedPromisedTarget, true),
         }
     }
 
@@ -880,29 +1475,50 @@ pub const Connection = struct {
         local: LocalCapability,
         question_id: u32,
         local_sink: ?*?[]u8,
+        local_caps_sink: ?*std.ArrayList(Capability),
+        param_caps_override: ?[]const Capability,
     ) anyerror!void {
         self.dispatch_depth += 1;
         defer self.dispatch_depth -= 1;
 
         if (call.interfaceId() != local.interface_id) {
             if (local_sink != null) return error.UnknownInterface;
-            try self.sendException(question_id, error.UnknownInterface);
+            try self.sendException(question_id, error.UnknownInterface, true);
             return;
         }
 
         if (call.sendResultsTo().which() != .caller) {
             if (local_sink != null) return error.UnsupportedSendResultsTo;
-            try self.sendException(question_id, error.UnsupportedSendResultsTo);
+            try self.sendException(question_id, error.UnsupportedSendResultsTo, true);
             return;
         }
 
         const params_payload = try call.params();
         const params = try params_payload.content();
-        const params_caps = try self.decodeCapTable(params_payload);
-        defer self.allocator.free(params_caps);
+        var decoded_caps: ?[]Capability = null;
+        if (param_caps_override == null) {
+            decoded_caps = try self.decodeCapTable(params_payload);
+        }
+        const params_caps = param_caps_override orelse decoded_caps.?;
+        defer {
+            if (decoded_caps) |caps| {
+                for (caps) |capability| capability.release();
+                self.allocator.free(caps);
+            }
+        }
+
+        if (local_sink == null) {
+            const answer = try self.ensureAnswer(question_id);
+            for (params_caps) |capability| {
+                try answer.held_caps.append(self.allocator, capability.retain());
+            }
+        }
 
         var result_caps = std.ArrayList(Capability).empty;
-        defer result_caps.deinit(self.allocator);
+        defer {
+            for (result_caps.items) |capability| capability.release();
+            result_caps.deinit(self.allocator);
+        }
 
         var message = capnp.MessageBuilder{ .allocator = self.allocator };
         try message.init();
@@ -911,6 +1527,9 @@ pub const Connection = struct {
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
         var return_ = try root.setReturn();
         return_.setAnswerId(question_id);
+        // The params capabilities are held until Finish and released with
+        // explicit Release messages.
+        return_.setReleaseParamCaps(local_sink != null);
 
         var results = try return_.setResults();
         const call_context = Call{
@@ -922,8 +1541,9 @@ pub const Connection = struct {
         };
 
         const bytes = dispatch: {
-            local.dispatch(local.context, call.methodId(), call_context) catch |err| {
+            local.dispatch(dispatchContext(local.context), call.methodId(), call_context) catch |err| {
                 var exception = try return_.setException();
+                return_.setReleaseParamCaps(local_sink != null);
                 try exception.setReason(@errorName(err));
                 exception.setType(.failed);
                 break :dispatch try message.toBytes(self.allocator);
@@ -932,8 +1552,18 @@ pub const Connection = struct {
             if (result_caps.items.len != 0) {
                 var cap_table = try results.capTable();
                 try cap_table.init(@intCast(result_caps.items.len));
-                for (result_caps.items, 0..) |capability, i| {
-                    try self.encodeCapability(capability, cap_table.get(@intCast(i)));
+                if (local_sink != null) {
+                    const caps = local_caps_sink orelse return error.MissingLocalCapSink;
+                    for (result_caps.items, 0..) |capability, i| {
+                        cap_table.get(@intCast(i)).setNone();
+                        try caps.append(self.allocator, capability.retain());
+                    }
+                } else {
+                    const answer = try self.ensureAnswer(question_id);
+                    for (result_caps.items, 0..) |capability, i| {
+                        const export_id = try self.encodeCapability(capability, cap_table.get(@intCast(i)));
+                        if (export_id) |id| try answer.export_ids.append(self.allocator, id);
+                    }
                 }
             }
 
@@ -958,19 +1588,23 @@ pub const Connection = struct {
 
         while (self.deferred_calls.items.len != 0) {
             if (self.dispatch_depth != 0) return;
-            const bytes = self.deferred_calls.orderedRemove(0);
-            defer self.allocator.free(bytes);
-            try self.handle(bytes);
+            const item = self.deferred_calls.orderedRemove(0);
+            defer self.allocator.free(item.bytes);
+            try self.handle(item.bytes);
         }
     }
 
-    fn storeAnswer(self: *Connection, question_id: u32, bytes: []const u8) !void {
+    fn ensureAnswer(self: *Connection, question_id: u32) !*AnswerState {
         const entry = try self.answers.getOrPut(question_id);
         if (!entry.found_existing) entry.value_ptr.* = .{};
+        return entry.value_ptr;
+    }
 
+    fn storeAnswer(self: *Connection, question_id: u32, bytes: []const u8) !void {
+        const entry = try self.ensureAnswer(question_id);
         const copy = try self.allocator.dupe(u8, bytes);
-        if (entry.value_ptr.resolved_bytes) |old| self.allocator.free(old);
-        entry.value_ptr.resolved_bytes = copy;
+        if (entry.resolved_bytes) |old| self.allocator.free(old);
+        entry.resolved_bytes = copy;
     }
 
     fn processPendingAnswer(self: *Connection, question_id: u32) anyerror!void {
@@ -981,9 +1615,10 @@ pub const Connection = struct {
         entry.pending = .empty;
         defer pending.deinit(self.allocator);
 
-        for (pending.items) |bytes| {
-            defer self.allocator.free(bytes);
-            try self.handle(bytes);
+        for (pending.items) |item| {
+            defer self.allocator.free(item.bytes);
+            _ = self.queued_questions.remove(item.question_id);
+            try self.handle(item.bytes);
         }
     }
 
@@ -1027,49 +1662,133 @@ pub const Connection = struct {
 
         if (descriptor.senderHosted()) |export_id| {
             const entry = self.exports.get(export_id) orelse return error.UnknownCapability;
-            return entry.capability;
+            return entry.capability.retain();
         }
 
         if (descriptor.senderPromise()) |export_id| {
             const entry = self.exports.get(export_id) orelse return error.UnknownCapability;
-            return entry.capability;
+            return entry.capability.retain();
         }
 
         if (descriptor.receiverHosted()) |export_id| {
-            try self.registerImport(export_id);
-            return .{ .imported = .{ .connection = self, .export_id = export_id } };
+            const entry = self.imports.get(export_id) orelse return error.UnknownCapability;
+            entry.handle_refs += 1;
+            return .{ .imported = entry };
         }
 
         return error.UnsupportedCapability;
+    }
+
+    fn releaseExportRef(self: *Connection, export_id: u32, count: u32) void {
+        const entry = self.exports.get(export_id) orelse return;
+        if (count >= entry.wire_refs) {
+            entry.wire_refs = 0;
+        } else {
+            entry.wire_refs -= count;
+        }
+        self.maybeDestroyExport(entry);
+    }
+
+    fn cancelQueuedCalls(self: *Connection, question_id: u32) void {
+        var deferred_index: usize = 0;
+        while (deferred_index < self.deferred_calls.items.len) {
+            if (self.deferred_calls.items[deferred_index].question_id == question_id) {
+                const item = self.deferred_calls.orderedRemove(deferred_index);
+                self.allocator.free(item.bytes);
+            } else {
+                deferred_index += 1;
+            }
+        }
+
+        var export_it = self.exports.valueIterator();
+        while (export_it.next()) |entry_ptr| {
+            const entry = entry_ptr.*;
+            var index: usize = 0;
+            while (index < entry.pending_calls.items.len) {
+                if (entry.pending_calls.items[index].question_id == question_id) {
+                    const item = entry.pending_calls.orderedRemove(index);
+                    self.allocator.free(item.bytes);
+                } else {
+                    index += 1;
+                }
+            }
+        }
+
+        var answer_it = self.answers.valueIterator();
+        while (answer_it.next()) |answer| {
+            var index: usize = 0;
+            while (index < answer.pending.items.len) {
+                if (answer.pending.items[index].question_id == question_id) {
+                    const item = answer.pending.orderedRemove(index);
+                    self.allocator.free(item.bytes);
+                } else {
+                    index += 1;
+                }
+            }
+        }
     }
 
     fn handleFinish(self: *Connection, finish: rpc.Finish.Reader) !void {
         const question_id = finish.questionId();
         if (self.answers.fetchRemove(question_id)) |removed| {
             var answer = removed.value;
-            if (answer.resolved_bytes) |bytes| self.allocator.free(bytes);
-            for (answer.pending.items) |bytes| self.allocator.free(bytes);
-            answer.pending.deinit(self.allocator);
-        }
-    }
-    fn handleRelease(self: *Connection, release: rpc.Release.Reader) !void {
-        const export_id = release.id();
-        const count = release.referenceCount();
-        if (self.exports.getPtr(export_id)) |entry| {
-            if (count >= entry.ref_count) {
-                if (self.exports.fetchRemove(export_id)) |removed| {
-                    var removed_entry = removed.value;
-                    for (removed_entry.pending_calls.items) |bytes| self.allocator.free(bytes);
-                    removed_entry.pending_calls.deinit(self.allocator);
+            if (finish.releaseResultCaps()) {
+                for (answer.export_ids.items) |export_id| {
+                    self.releaseExportRef(export_id, 1);
                 }
-            } else {
-                entry.ref_count -= count;
             }
+            if (answer.resolved_bytes) |bytes| self.allocator.free(bytes);
+            for (answer.pending.items) |item| {
+                _ = self.queued_questions.remove(item.question_id);
+                self.allocator.free(item.bytes);
+            }
+            answer.pending.deinit(self.allocator);
+            answer.export_ids.deinit(self.allocator);
+            for (answer.held_caps.items) |capability| capability.release();
+            answer.held_caps.deinit(self.allocator);
+        }
+        _ = self.queued_questions.remove(question_id);
+        self.cancelQueuedCalls(question_id);
+    }
+
+    fn handleRelease(self: *Connection, release: rpc.Release.Reader) !void {
+        self.releaseExportRef(release.id(), release.referenceCount());
+    }
+
+    fn handleResolve(self: *Connection, resolve: rpc.Resolve.Reader) !void {
+        const promise_id = resolve.promiseId();
+        const descriptor = try resolve.cap();
+        const entry = self.imports.get(promise_id) orelse {
+            if (descriptor) |descriptor_value| {
+                // We already released this promise. Release the resolution too.
+                const capability = try self.decodeCapability(descriptor_value);
+                capability.release();
+            }
+            return;
+        };
+
+        if (!isNone(entry.resolved)) {
+            entry.resolved.release();
+            entry.resolved = .none;
+        }
+
+        if (descriptor) |descriptor_value| {
+            entry.resolved = try self.decodeCapability(descriptor_value);
         }
     }
 
     fn handleReturn(self: *Connection, return_: rpc.Return.Reader, bytes: []const u8) !void {
         const answer_id = return_.answerId();
+        // A Return for a question we no longer track is a late reply to a
+        // canceled/abandoned call. Ignore it instead of growing the table.
+        const question = self.questions.get(answer_id) orelse return;
+        if (return_.releaseParamCaps()) {
+            for (question.param_export_ids.items) |export_id| {
+                self.releaseExportRef(export_id, 1);
+            }
+            question.param_export_ids.clearRetainingCapacity();
+        }
+
         const copy = try self.allocator.dupe(u8, bytes);
         errdefer self.allocator.free(copy);
 
@@ -1078,7 +1797,7 @@ pub const Connection = struct {
         }
     }
 
-    fn sendException(self: *Connection, answer_id: u32, err: anyerror) !void {
+    fn sendException(self: *Connection, answer_id: u32, err: anyerror, release_param_caps: bool) !void {
         var message = capnp.MessageBuilder{ .allocator = self.allocator };
         try message.init();
         defer message.deinit();
@@ -1086,6 +1805,7 @@ pub const Connection = struct {
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
         var return_ = try root.setReturn();
         return_.setAnswerId(answer_id);
+        return_.setReleaseParamCaps(release_param_caps);
 
         var exception = try return_.setException();
         try exception.setReason(@errorName(err));
@@ -1099,7 +1819,10 @@ pub const Connection = struct {
     fn decodeCapTable(self: *Connection, payload: rpc.Payload.Reader) ![]Capability {
         const cap_table = try payload.capTable();
         var caps = std.ArrayList(Capability).empty;
-        errdefer caps.deinit(self.allocator);
+        errdefer {
+            for (caps.items) |capability| capability.release();
+            caps.deinit(self.allocator);
+        }
 
         for (0..cap_table.length) |i| {
             try caps.append(self.allocator, try self.decodeCapability(cap_table.get(@intCast(i))));
@@ -1111,18 +1834,16 @@ pub const Connection = struct {
         if (descriptor.none() != null) return .none;
 
         if (descriptor.senderHosted()) |export_id| {
-            try self.registerImport(export_id);
-            return .{ .imported = .{ .connection = self, .export_id = export_id } };
+            return self.importCapability(export_id);
         }
 
         if (descriptor.senderPromise()) |export_id| {
-            try self.registerImport(export_id);
-            return .{ .imported = .{ .connection = self, .export_id = export_id } };
+            return self.importCapability(export_id);
         }
 
         if (descriptor.receiverHosted()) |export_id| {
             const entry = self.exports.get(export_id) orelse return error.UnknownCapability;
-            return entry.capability;
+            return entry.capability.retain();
         }
 
         if (try descriptor.receiverAnswer()) |answer| {
@@ -1131,9 +1852,7 @@ pub const Connection = struct {
 
             if (self.answers.getPtr(question_id)) |state| {
                 if (state.resolved_bytes) |bytes| {
-                    if (self.resolveAnswerCapability(bytes, transform)) |resolved| {
-                        return resolved;
-                    } else |_| {}
+                    return try self.resolveAnswerCapability(bytes, transform);
                 }
             }
 
@@ -1143,23 +1862,74 @@ pub const Connection = struct {
                 const op = transform.get(0);
                 pointer_field = op.getPointerField() orelse return error.UnsupportedCapability;
             }
-            return .{ .promised_answer = .{
-                .connection = self,
-                .question_id = question_id,
-                .pointer_field = pointer_field,
-            } };
+            return self.newUnresolvedAnswerCapability(question_id, pointer_field);
         }
 
         return error.UnsupportedCapability;
     }
 
-    fn encodeCapability(self: *Connection, capability: Capability, descriptor: rpc.CapDescriptor.Builder) !void {
+    fn importCapability(self: *Connection, export_id: u32) !Capability {
+        if (self.imports.get(export_id)) |entry| {
+            entry.wire_refs += 1;
+            entry.handle_refs += 1;
+            return .{ .imported = entry };
+        }
+
+        const entry = try self.allocator.create(ImportEntry);
+        errdefer self.allocator.destroy(entry);
+        entry.* = .{
+            .connection = self,
+            .export_id = export_id,
+            .wire_refs = 1,
+            .handle_refs = 1,
+        };
+        try self.imports.put(export_id, entry);
+        return .{ .imported = entry };
+    }
+
+    fn releaseImport(self: *Connection, entry: *ImportEntry) void {
+        std.debug.assert(entry.handle_refs > 0);
+        entry.handle_refs -= 1;
+        if (entry.handle_refs != 0) return;
+
+        if (self.imports.get(entry.export_id) == entry) {
+            _ = self.imports.remove(entry.export_id);
+        }
+
+        if (!isNone(entry.resolved)) {
+            entry.resolved.release();
+            entry.resolved = .none;
+        }
+
+        if (entry.wire_refs > 0 and !self.closing) {
+            self.sendRelease(entry.export_id, entry.wire_refs) catch |err| self.noteError(err);
+        }
+        self.allocator.destroy(entry);
+    }
+
+    /// Encode a capability into a `CapDescriptor`. Returns the export id used,
+    /// when the descriptor created or reused an export.
+    fn encodeCapability(
+        self: *Connection,
+        capability: Capability,
+        descriptor: rpc.CapDescriptor.Builder,
+    ) !?u32 {
         switch (capability) {
-            .none => descriptor.setNone(),
-            .local => descriptor.setSenderHosted(try self.allocExport(capability)),
-            .promised => |promised| {
-                if (promised.connection != self) return error.ForeignCapability;
-                descriptor.setSenderPromise(promised.export_id);
+            .none => {
+                descriptor.setNone();
+                return null;
+            },
+            .local => |entry| {
+                const export_id = try self.exportLocal(entry);
+                descriptor.setSenderHosted(export_id);
+                return export_id;
+            },
+            .promised => |entry| {
+                if (entry.connection != self) return error.ForeignCapability;
+                if (!entry.is_promise) return self.encodeCapability(entry.capability, descriptor);
+                const export_id = try self.exportShared(capability);
+                descriptor.setSenderPromise(export_id);
+                return export_id;
             },
             .promised_answer => |answer| {
                 if (answer.connection != self) return error.ForeignCapability;
@@ -1170,37 +1940,79 @@ pub const Connection = struct {
                     try transform.init(1);
                     transform.get(0).setGetPointerField(pointer_field);
                 }
+                return null;
             },
             .imported => |imported| {
                 if (imported.connection != self) return error.ForeignCapability;
+                if (self.imports.get(imported.export_id) != imported) return error.UnknownCapability;
                 descriptor.setReceiverHosted(imported.export_id);
+                return null;
             },
         }
     }
 
-    fn registerImport(self: *Connection, export_id: u32) !void {
-        const entry = try self.imports.getOrPut(export_id);
-        if (entry.found_existing) {
-            entry.value_ptr.* += 1;
-        } else {
-            entry.value_ptr.* = 1;
-        }
+    fn exportShared(self: *Connection, capability: Capability) !u32 {
+        return switch (capability) {
+            .local => |entry| self.exportLocal(entry),
+            .promised => |entry| blk: {
+                if (entry.connection != self) return error.ForeignCapability;
+                entry.wire_refs += 1;
+                break :blk entry.export_id;
+            },
+            else => error.UnsupportedCapability,
+        };
     }
 
-    pub fn releaseCapability(self: *Connection, capability: Capability) !void {
-        switch (capability) {
-            .imported => |imported| {
-                if (imported.connection != self) return error.WrongConnection;
-                const count = self.imports.getPtr(imported.export_id) orelse return error.UnknownCapability;
-                if (count.* > 1) {
-                    count.* -= 1;
-                    return;
-                }
-                _ = self.imports.remove(imported.export_id);
-                try self.sendRelease(imported.export_id);
-            },
-            .local, .promised, .promised_answer, .none => {},
+    fn exportLocal(self: *Connection, entry: *LocalEntry) !u32 {
+        if (entry.connection != self) return error.ForeignCapability;
+
+        if (entry.export_id) |export_id| {
+            if (self.exports.get(export_id)) |export_entry| {
+                export_entry.wire_refs += 1;
+                return export_id;
+            }
+            entry.export_id = null;
         }
+
+        const export_entry = try self.allocExport(.{ .local = entry });
+        export_entry.wire_refs = 1;
+        entry.export_id = export_entry.export_id;
+        return export_entry.export_id;
+    }
+
+    fn allocExport(self: *Connection, capability: Capability) !*ExportEntry {
+        const export_id = self.allocExportId();
+        const entry = try self.allocator.create(ExportEntry);
+        errdefer self.allocator.destroy(entry);
+        entry.* = .{
+            .connection = self,
+            .export_id = export_id,
+            .capability = capability.retain(),
+            .wire_refs = 0,
+        };
+        try self.exports.put(export_id, entry);
+        return entry;
+    }
+
+    fn maybeDestroyExport(self: *Connection, entry: *ExportEntry) void {
+        if (entry.wire_refs != 0 or entry.handle_refs != 0) return;
+
+        if (self.exports.get(entry.export_id) == entry) {
+            _ = self.exports.remove(entry.export_id);
+        }
+        switch (entry.capability) {
+            .local => |local| {
+                if (local.export_id == entry.export_id) local.export_id = null;
+            },
+            else => {},
+        }
+        self.destroyExport(entry);
+    }
+
+    fn releasePromiseHandle(self: *Connection, entry: *ExportEntry) void {
+        std.debug.assert(entry.handle_refs > 0);
+        entry.handle_refs -= 1;
+        self.maybeDestroyExport(entry);
     }
 
     pub fn sendDisembargoLoopback(self: *Connection, target: Capability, embargo_id: u32) !void {
@@ -1242,6 +2054,22 @@ pub const Connection = struct {
                 const incoming_target = try disembargo.target();
                 if (incoming_target.importedCap()) |target_id| {
                     echo_target.setImportedCap(target_id);
+                } else if (try incoming_target.promisedAnswer()) |incoming_answer| {
+                    var echo_answer = try echo_target.setPromisedAnswer();
+                    echo_answer.setQuestionId(incoming_answer.questionId());
+                    const transform = try incoming_answer.transform();
+                    if (transform.length != 0) {
+                        var echo_transform = try echo_answer.transform();
+                        try echo_transform.init(transform.length);
+                        for (0..transform.length) |i| {
+                            const op = transform.get(@intCast(i));
+                            const pointer_field = op.getPointerField() orelse
+                                return error.UnsupportedTransform;
+                            echo_transform.get(@intCast(i)).setGetPointerField(pointer_field);
+                        }
+                    }
+                } else {
+                    return error.UnsupportedTarget;
                 }
                 var echo_context = echo.context();
                 echo_context.setReceiverLoopback(embargo_id);
@@ -1269,14 +2097,14 @@ pub const Connection = struct {
         var resolve = try root.setResolve();
         resolve.setPromiseId(promise_id);
         const cap = try resolve.setCap();
-        try self.encodeCapability(target, cap);
+        _ = try self.encodeCapability(target, cap);
 
         const bytes = try message.toBytes(self.allocator);
         defer self.allocator.free(bytes);
         try self.sendRaw(bytes);
     }
 
-    fn sendRelease(self: *Connection, export_id: u32) !void {
+    fn sendRelease(self: *Connection, export_id: u32, reference_count: u32) !void {
         var message = capnp.MessageBuilder{ .allocator = self.allocator };
         try message.init();
         defer message.deinit();
@@ -1284,7 +2112,7 @@ pub const Connection = struct {
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
         var release = try root.setRelease();
         release.setId(export_id);
-        release.setReferenceCount(1);
+        release.setReferenceCount(reference_count);
 
         const bytes = try message.toBytes(self.allocator);
         defer self.allocator.free(bytes);
@@ -1292,22 +2120,20 @@ pub const Connection = struct {
     }
 
     fn allocQuestionId(self: *Connection) u32 {
-        const id = self.next_question_id;
-        self.next_question_id +%= 1;
-        if (self.next_question_id == 0) self.next_question_id = 1;
-        return id;
+        while (true) {
+            const id = self.next_question_id;
+            self.next_question_id +%= 1;
+            if (self.next_question_id == 0) self.next_question_id = 1;
+            if (!self.questions.contains(id) and !self.returns.contains(id)) return id;
+        }
     }
 
     fn allocExportId(self: *Connection) u32 {
-        const id = self.next_export_id;
-        self.next_export_id +%= 1;
-        if (self.next_export_id == 0) self.next_export_id = 1;
-        return id;
-    }
-
-    fn allocExport(self: *Connection, capability: Capability) !u32 {
-        const id = self.allocExportId();
-        try self.exports.put(id, .{ .capability = capability, .ref_count = 1 });
-        return id;
+        while (true) {
+            const id = self.next_export_id;
+            self.next_export_id +%= 1;
+            if (self.next_export_id == 0) self.next_export_id = 1;
+            if (!self.exports.contains(id)) return id;
+        }
     }
 };

@@ -34,7 +34,7 @@ pub fn build(b: *std.Build) void {
     const capnp_rpc_mod = b.addModule("capnp_rpc", .{
         .target = target,
         .optimize = optimize,
-        .root_source_file = b.path("src/rpc/connection.zig"),
+        .root_source_file = b.path("src/rpc/mod.zig"),
         .imports = &.{
             .{ .name = "capnp", .module = capnp_mod },
         },

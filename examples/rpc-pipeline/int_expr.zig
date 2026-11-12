@@ -39,7 +39,7 @@ pub const IntExpr = struct {
         var request = try connection.beginCall(target, schema.Calculator.IntExpr.id, 0);
         defer request.deinit();
         var response = try request.send();
-        defer response.deinit(connection.allocator);
+        defer response.deinit();
         const results = try response.results(
             schema.Calculator.IntExpr.EvalResults.Reader,
             schema.Calculator.IntExpr.EvalResults.reader_trait,
