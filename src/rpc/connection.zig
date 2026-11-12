@@ -203,7 +203,10 @@ pub const Capability = union(enum) {
     local: *LocalEntry,
     imported: *ImportEntry,
     promised: *ExportEntry,
-    promised_answer: *AnswerCapability,
+    /// Pipelining on the result of a question we asked.
+    answer_pipeline: *AnswerCapability,
+    /// A capability we promised as part of an answer we owe the peer.
+    answer_promise: *AnswerCapability,
     none: void,
 
     /// Add one reference to this handle and return it.
@@ -212,7 +215,8 @@ pub const Capability = union(enum) {
             .local => |entry| entry.refs += 1,
             .imported => |entry| entry.handle_refs += 1,
             .promised => |entry| entry.handle_refs += 1,
-            .promised_answer => |entry| entry.refs += 1,
+            .answer_pipeline => |entry| entry.refs += 1,
+            .answer_promise => |entry| entry.refs += 1,
             .none => {},
         }
         return self;
@@ -224,7 +228,7 @@ pub const Capability = union(enum) {
             .local => |entry| entry.connection.releaseLocal(entry),
             .imported => |entry| entry.connection.releaseImport(entry),
             .promised => |entry| entry.connection.releasePromiseHandle(entry),
-            .promised_answer => |entry| entry.connection.releaseAnswerCapability(entry),
+            .answer_pipeline, .answer_promise => |entry| entry.connection.releaseAnswerCapability(entry),
             .none => {},
         }
     }
@@ -234,7 +238,8 @@ pub const Capability = union(enum) {
             .local => |entry| entry.connection.beginLocalCall(entry, interface_id, method_id),
             .imported => |entry| entry.connection.beginImportCall(entry, interface_id, method_id),
             .promised => |entry| entry.connection.beginPromiseCall(entry, interface_id, method_id),
-            .promised_answer => |entry| entry.connection.beginPipelinedCall(entry, interface_id, method_id),
+            .answer_pipeline => |entry| entry.connection.beginPipelinedCall(entry, interface_id, method_id),
+            .answer_promise => |entry| entry.connection.beginPromisedAnswerCall(entry, interface_id, method_id),
             .none => error.NoCapability,
         };
     }
@@ -744,7 +749,7 @@ pub const Connection = struct {
     }
 
     pub fn isClosed(self: *Connection) bool {
-        return self.transport.isClosed();
+        return self.closed or self.transport.isClosed();
     }
 
     pub fn deinit(self: *Connection) void {
@@ -884,6 +889,39 @@ pub const Connection = struct {
         if (self.pending_error == null) self.pending_error = err;
     }
 
+    /// Mark the connection unusable and notify the peer. Used for protocol
+    /// errors that cannot be reported as a call exception.
+    fn failConnection(
+        self: *Connection,
+        err: anyerror,
+        abort_type: rpc.Exception.Type,
+    ) anyerror {
+        if (!self.closed and !self.closing) {
+            self.sendAbort(@errorName(err), abort_type) catch {};
+        }
+        self.closed = true;
+        return err;
+    }
+
+    fn sendAbort(
+        self: *Connection,
+        reason: [:0]const u8,
+        abort_type: rpc.Exception.Type,
+    ) !void {
+        var message = capnp.MessageBuilder{ .allocator = self.allocator };
+        try message.init();
+        defer message.deinit();
+
+        var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
+        var exception = try root.setAbort();
+        try exception.setReason(reason);
+        exception.setType(abort_type);
+
+        const bytes = try message.toBytes(self.allocator);
+        defer self.allocator.free(bytes);
+        try self.sendRaw(bytes);
+    }
+
     /// Create an owned handle for a local capability. Descriptors with the same
     /// context, interface id, and dispatch function share one `LocalEntry`.
     pub fn initLocal(self: *Connection, capability: LocalCapability) !Capability {
@@ -936,14 +974,17 @@ pub const Connection = struct {
     /// Process all currently available messages and flush buffered output.
     /// This never waits for the transport.
     pub fn step(self: *Connection) !void {
+        if (self.closed) return error.EndOfStream;
         if (self.pending_error) |err| {
             self.pending_error = null;
             return err;
         }
         while (try self.transport.receive(self.allocator)) |bytes| {
             defer self.allocator.free(bytes);
-            try self.handle(bytes);
-            if (self.dispatch_depth == 0) try self.drainDeferredCalls();
+            self.handle(bytes) catch |err| return self.failConnection(err, .failed);
+            if (self.dispatch_depth == 0) {
+                self.drainDeferredCalls() catch |err| return self.failConnection(err, .failed);
+            }
         }
         try self.transport.flush();
     }
@@ -1087,7 +1128,8 @@ pub const Connection = struct {
             .local => |entry| self.beginLocalCall(entry, interface_id, method_id),
             .imported => |entry| self.beginImportCall(entry, interface_id, method_id),
             .promised => |entry| self.beginPromiseCall(entry, interface_id, method_id),
-            .promised_answer => |entry| self.beginPipelinedCall(entry, interface_id, method_id),
+            .answer_pipeline => |entry| self.beginPipelinedCall(entry, interface_id, method_id),
+            .answer_promise => |entry| self.beginPromisedAnswerCall(entry, interface_id, method_id),
             .none => error.NoCapability,
         };
     }
@@ -1111,6 +1153,15 @@ pub const Connection = struct {
     ) !Request {
         if (entry.connection != self) return error.WrongConnection;
         if (self.imports.get(entry.export_id) != entry) return error.UnknownCapability;
+
+        // If the peer resolved this promise to a capability we host locally,
+        // route the call directly. Sending it to the promise id would make the
+        // peer forward it back (or reject it), and there is no wire ordering
+        // to preserve for a locally-hosted target.
+        switch (entry.resolved) {
+            .local => |resolved| return self.beginLocalCall(resolved, interface_id, method_id),
+            else => {},
+        }
 
         const question = try self.newQuestion();
         errdefer self.destroyQuestion(question);
@@ -1172,6 +1223,26 @@ pub const Connection = struct {
         };
     }
 
+    fn beginPromisedAnswerCall(
+        self: *Connection,
+        entry: *AnswerCapability,
+        interface_id: u64,
+        method_id: u16,
+    ) !Request {
+        if (entry.connection != self) return error.WrongConnection;
+        std.debug.assert(entry.question == null);
+
+        // This handle refers to an answer we owe the peer (created from a
+        // `receiverAnswer` descriptor), not to an outstanding question of
+        // ours. It must be resolved locally; sending `promisedAnswer` back
+        // over the wire would address the wrong table.
+        const answer = self.answers.getPtr(entry.question_id) orelse return error.UnknownAnswer;
+        const bytes = answer.resolved_bytes orelse return error.AnswerNotReady;
+        const capability = try self.resolveAnswerCapabilityField(bytes, entry.pointer_field);
+        defer capability.release();
+        return self.beginCall(capability, interface_id, method_id);
+    }
+
     fn beginPipelinedCall(
         self: *Connection,
         entry: *AnswerCapability,
@@ -1179,18 +1250,7 @@ pub const Connection = struct {
         method_id: u16,
     ) !Request {
         if (entry.connection != self) return error.WrongConnection;
-
-        // An AnswerCapability with a null `question` refers to an answer we
-        // owe the peer (created from a `receiverAnswer` descriptor), not to an
-        // outstanding question of ours. It must be resolved locally; sending
-        // `promisedAnswer` back over the wire would address the wrong table.
-        if (entry.question == null) {
-            const answer = self.answers.getPtr(entry.question_id) orelse return error.UnknownAnswer;
-            const bytes = answer.resolved_bytes orelse return error.AnswerNotReady;
-            const capability = try self.resolveAnswerCapabilityField(bytes, entry.pointer_field);
-            defer capability.release();
-            return self.beginCall(capability, interface_id, method_id);
-        }
+        std.debug.assert(entry.question != null);
 
         const question = try self.newQuestion();
         errdefer self.destroyQuestion(question);
@@ -1217,7 +1277,7 @@ pub const Connection = struct {
         call.setInterfaceId(interface_id);
         call.setMethodId(method_id);
 
-        const retained_target: Capability = .{ .promised_answer = entry };
+        const retained_target: Capability = .{ .answer_pipeline = entry };
         return .{
             .connection = self,
             .message = message,
@@ -1256,7 +1316,7 @@ pub const Connection = struct {
             .refs = 1,
         };
         try self.answer_capabilities.append(self.allocator, entry);
-        return .{ .promised_answer = entry };
+        return .{ .answer_pipeline = entry };
     }
 
     fn newUnresolvedAnswerCapability(
@@ -1274,7 +1334,7 @@ pub const Connection = struct {
             .refs = 1,
         };
         try self.answer_capabilities.append(self.allocator, entry);
-        return .{ .promised_answer = entry };
+        return .{ .answer_promise = entry };
     }
 
     fn releaseAnswerCapability(self: *Connection, entry: *AnswerCapability) void {
@@ -1299,6 +1359,8 @@ pub const Connection = struct {
     fn waitReturn(self: *Connection, question_id: u32) !Response {
         while (true) {
             if (try self.takeReturn(question_id)) |response| return response;
+
+            if (self.closed) return error.EndOfStream;
 
             if (self.transport.isClosed()) {
                 // Drain anything that was already buffered before the close.
@@ -1375,8 +1437,11 @@ pub const Connection = struct {
                 const release = (try root.release()) orelse return error.InvalidMessage;
                 try self.handleRelease(release);
             },
-            .abort => return error.ConnectionAborted,
-            else => return error.UnsupportedMessage,
+            .abort => {
+                self.closed = true;
+                return error.ConnectionAborted;
+            },
+            else => return self.failConnection(error.UnsupportedMessage, .unimplemented),
         }
     }
 
@@ -1561,7 +1626,7 @@ pub const Connection = struct {
                 try self.deliverCall(call, entry.capability, question_id, bytes);
             },
             .imported => try self.sendException(question_id, error.ForwardingUnsupported, true),
-            .promised_answer => try self.sendException(question_id, error.UnsupportedPromisedTarget, true),
+            .answer_pipeline, .answer_promise => try self.sendException(question_id, error.UnsupportedPromisedTarget, true),
             .none => try self.sendException(question_id, error.UnknownCapability, true),
         }
     }
@@ -2078,7 +2143,7 @@ pub const Connection = struct {
                 descriptor.setSenderPromise(export_id);
                 return export_id;
             },
-            .promised_answer => |answer| {
+            .answer_pipeline => |answer| {
                 if (answer.connection != self) return error.ForeignCapability;
                 var promised_answer = try descriptor.setReceiverAnswer();
                 promised_answer.setQuestionId(answer.question_id);
@@ -2089,6 +2154,9 @@ pub const Connection = struct {
                 }
                 return null;
             },
+            // An answer we owe the peer cannot be encoded as a capability: the
+            // peer has no address for it in its own tables.
+            .answer_promise => return error.UnsupportedCapability,
             .imported => |imported| {
                 if (imported.connection != self) return error.ForeignCapability;
                 if (self.imports.get(imported.export_id) != imported) return error.UnknownCapability;

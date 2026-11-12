@@ -96,6 +96,13 @@ const ProviderInterface = struct {
                 state.stored = call.capabilities[0].retain();
                 try call.results.setText("stored");
             },
+            7 => {
+                // Resolve our stored promise to the capability parameter.
+                if (call.capabilities.len != 1) return error.MissingCapability;
+                const promise = state.promise orelse return error.MissingPromise;
+                try call.connection.resolvePromise(promise, call.capabilities[0]);
+                try call.results.setText("resolved-to-param");
+            },
             else => return error.MethodNotFound,
         }
     }
@@ -642,6 +649,73 @@ test "receiverAnswer queued behind a promise dispatches locally once resolved" {
     defer queued_response.deinit();
 }
 
+test "resolved promise routes calls to a locally hosted capability" {
+    var loopback = transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    var server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer server.deinit();
+
+    var client = try connection.Connection.init(testing.allocator, loopback.endpoint(.client));
+    defer client.deinit();
+
+    client.peer = server;
+    server.peer = client;
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    server.setBootstrap(try server.initLocal(.{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    }));
+
+    const provider = try client.bootstrap();
+    defer provider.release();
+
+    var promise_request = try client.beginCall(provider, ProviderInterface.id, 2);
+    defer promise_request.deinit();
+    var promise_response = try promise_request.send();
+    defer promise_response.deinit();
+    const promise = try promise_response.capability(0);
+    defer promise.release();
+
+    // Resolve the server's promise to a capability hosted by the client.
+    var resolve_request = try client.beginCall(provider, ProviderInterface.id, 7);
+    defer resolve_request.deinit();
+    const index = try resolve_request.addLocalCapability(.{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    });
+    var resolve_params = try resolve_request.params();
+    resolve_params.content().setCapability(index);
+    var resolve_response = try resolve_request.send();
+    defer resolve_response.deinit();
+    const resolve_payload = try resolve_response.payload();
+    try testing.expectEqualStrings("resolved-to-param", try (try resolve_payload.content()).asText());
+
+    const promise_import = client.imports.get(promise.imported.export_id).?;
+    switch (promise_import.resolved) {
+        .local => {},
+        else => return error.ResolveNotRoutedLocally,
+    }
+
+    // A call on the promise must now dispatch on the client's local object,
+    // not make a round trip to the server.
+    var echo_request = try client.beginCall(promise, EchoInterface.id, 0);
+    defer echo_request.deinit();
+    var echo_params = try echo_request.params();
+    try echo_params.content().setText("local-reflection");
+    var echo_response = try echo_request.send();
+    defer echo_response.deinit();
+    const echo_payload = try echo_response.payload();
+    try testing.expectEqualStrings("local-reflection", try (try echo_payload.content()).asText());
+}
+
 test "send failure releases its question" {
     var loopback = transports.Loopback.init(testing.allocator);
     defer loopback.deinit();
@@ -683,6 +757,38 @@ test "bootstrap wait failure releases its question" {
     var promise = try conn.bootstrapStart();
     try testing.expectError(error.NoWaitSource, promise.wait());
     try testing.expectEqual(@as(usize, 0), conn.questions.count());
+}
+
+test "unsupported messages abort the connection" {
+    var loopback = transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, loopback.endpoint(.client));
+    defer client.deinit();
+
+    var message = capnp.MessageBuilder{ .allocator = testing.allocator };
+    try message.init();
+    defer message.deinit();
+
+    var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
+    _ = try root.setUnimplemented();
+
+    const bytes = try message.toBytes(testing.allocator);
+    defer testing.allocator.free(bytes);
+    // The loopback transport always sends to the opposite side, so send from
+    // the server to deliver the message to the client.
+    try server.transport.send(bytes);
+
+    try testing.expectError(error.UnsupportedMessage, client.step());
+    try testing.expect(client.isClosed());
+    try testing.expectError(error.EndOfStream, client.step());
+
+    // The client must have sent an Abort to the peer.
+    try testing.expectError(error.ConnectionAborted, server.step());
+    try testing.expect(server.isClosed());
 }
 
 test "connection deinit frees outstanding question param exports" {
