@@ -239,6 +239,7 @@ pub fn Refactor(comptime W: type) type {
             imports: []const ImportAlias = &.{},
             emit_header: bool = true,
             used_imports: ?*std.AutoHashMap(u64, void) = null,
+            interface_depth: usize = 0,
 
             pub fn getNodeById(self: *WriteContext, id: u64) E!schema.Node.Reader {
                 return self.nodes.get(id) orelse error.NodeNotFound;
@@ -914,8 +915,14 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writeIndent();
                     try ctx.writer.print("pub const id: u64 = 0x{x};\n\n", .{node.id()});
 
-                    try ctx.writeIndent();
-                    try ctx.writer.writeAll("const _capnp_rpc = @import(\"capnp_rpc\");\n\n");
+                    // A nested interface can reuse the RPC import from its parent
+                    // interface; declaring it again would be an ambiguous reference.
+                    if (ctx.interface_depth == 0) {
+                        try ctx.writeIndent();
+                        try ctx.writer.writeAll("const _capnp_rpc = @import(\"capnp_rpc\");\n\n");
+                    }
+                    ctx.interface_depth += 1;
+                    defer ctx.interface_depth -= 1;
 
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("pub const Reader = capnp.AnyPointerReader;\n");
@@ -1197,6 +1204,12 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writer.writeAll("};\n");
 
                     try writeAnnotations(ctx, try node.annotations(), "annotations");
+
+                    const nested_nodes = try node.nestedNodes();
+                    for (0..nested_nodes.length) |i| {
+                        const nested_node = nested_nodes.get(@intCast(i));
+                        try writeNode(ctx, try nested_node.name(), try ctx.getNodeById(nested_node.id()));
+                    }
 
                     ctx.indenter.dec();
                     try ctx.writeIndent();

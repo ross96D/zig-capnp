@@ -788,12 +788,12 @@ pub const Calculator = struct {
                 return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
-            pub fn a(self: @This()) i32 {
-                return self.reader.readIntField(i32, 0) ^ 0;
+            pub fn a(self: @This()) capnp.Error!_Root.Calculator.IntExpr.Reader {
+                return try self.reader.readPtrField(_Root.Calculator.IntExpr.Reader, 0);
             }
 
-            pub fn b(self: @This()) i32 {
-                return self.reader.readIntField(i32, 1) ^ 0;
+            pub fn b(self: @This()) capnp.Error!_Root.Calculator.IntExpr.Reader {
+                return try self.reader.readPtrField(_Root.Calculator.IntExpr.Reader, 1);
             }
         };
 
@@ -812,26 +812,26 @@ pub const Calculator = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
-            pub fn a(self: @This()) i32 {
-                return self.builder.readIntField(i32, 0) ^ 0;
+            pub fn a(self: @This()) _Root.Calculator.IntExpr.Builder {
+                return self.builder.buildPtrField(_Root.Calculator.IntExpr.Builder, 0);
             }
 
-            pub fn setA(self: @This(), v: i32) void {
-                self.builder.writeIntField(i32, 0, v ^ 0);
+            pub fn setA(self: @This()) _Root.Calculator.IntExpr.Builder {
+                return self.builder.buildPtrField(_Root.Calculator.IntExpr.Builder, 0);
             }
 
-            pub fn b(self: @This()) i32 {
-                return self.builder.readIntField(i32, 1) ^ 0;
+            pub fn b(self: @This()) _Root.Calculator.IntExpr.Builder {
+                return self.builder.buildPtrField(_Root.Calculator.IntExpr.Builder, 1);
             }
 
-            pub fn setB(self: @This(), v: i32) void {
-                self.builder.writeIntField(i32, 1, v ^ 0);
+            pub fn setB(self: @This()) _Root.Calculator.IntExpr.Builder {
+                return self.builder.buildPtrField(_Root.Calculator.IntExpr.Builder, 1);
             }
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
-            .data_words = 1,
-            .ptr_words = 0,
+            .data_words = 0,
+            .ptr_words = 2,
             .builder = @This().Builder.fromStructBuilder,
         };
     };
@@ -854,8 +854,8 @@ pub const Calculator = struct {
                 return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
-            pub fn result(self: @This()) i32 {
-                return self.reader.readIntField(i32, 0) ^ 0;
+            pub fn result(self: @This()) capnp.Error!_Root.Calculator.IntExpr.Reader {
+                return try self.reader.readPtrField(_Root.Calculator.IntExpr.Reader, 0);
             }
         };
 
@@ -874,18 +874,18 @@ pub const Calculator = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
-            pub fn result(self: @This()) i32 {
-                return self.builder.readIntField(i32, 0) ^ 0;
+            pub fn result(self: @This()) _Root.Calculator.IntExpr.Builder {
+                return self.builder.buildPtrField(_Root.Calculator.IntExpr.Builder, 0);
             }
 
-            pub fn setResult(self: @This(), v: i32) void {
-                self.builder.writeIntField(i32, 0, v ^ 0);
+            pub fn setResult(self: @This()) _Root.Calculator.IntExpr.Builder {
+                return self.builder.buildPtrField(_Root.Calculator.IntExpr.Builder, 0);
             }
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
-            .data_words = 1,
-            .ptr_words = 0,
+            .data_words = 0,
+            .ptr_words = 1,
             .builder = @This().Builder.fromStructBuilder,
         };
     };
@@ -908,12 +908,12 @@ pub const Calculator = struct {
                 return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
-            pub fn a(self: @This()) i32 {
-                return self.reader.readIntField(i32, 0) ^ 0;
+            pub fn a(self: @This()) capnp.Error!_Root.Calculator.IntExpr.Reader {
+                return try self.reader.readPtrField(_Root.Calculator.IntExpr.Reader, 0);
             }
 
-            pub fn b(self: @This()) i32 {
-                return self.reader.readIntField(i32, 1) ^ 0;
+            pub fn b(self: @This()) capnp.Error!_Root.Calculator.IntExpr.Reader {
+                return try self.reader.readPtrField(_Root.Calculator.IntExpr.Reader, 1);
             }
         };
 
@@ -932,26 +932,26 @@ pub const Calculator = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
-            pub fn a(self: @This()) i32 {
-                return self.builder.readIntField(i32, 0) ^ 0;
+            pub fn a(self: @This()) _Root.Calculator.IntExpr.Builder {
+                return self.builder.buildPtrField(_Root.Calculator.IntExpr.Builder, 0);
             }
 
-            pub fn setA(self: @This(), v: i32) void {
-                self.builder.writeIntField(i32, 0, v ^ 0);
+            pub fn setA(self: @This()) _Root.Calculator.IntExpr.Builder {
+                return self.builder.buildPtrField(_Root.Calculator.IntExpr.Builder, 0);
             }
 
-            pub fn b(self: @This()) i32 {
-                return self.builder.readIntField(i32, 1) ^ 0;
+            pub fn b(self: @This()) _Root.Calculator.IntExpr.Builder {
+                return self.builder.buildPtrField(_Root.Calculator.IntExpr.Builder, 1);
             }
 
-            pub fn setB(self: @This(), v: i32) void {
-                self.builder.writeIntField(i32, 1, v ^ 0);
+            pub fn setB(self: @This()) _Root.Calculator.IntExpr.Builder {
+                return self.builder.buildPtrField(_Root.Calculator.IntExpr.Builder, 1);
             }
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
-            .data_words = 1,
-            .ptr_words = 0,
+            .data_words = 0,
+            .ptr_words = 2,
             .builder = @This().Builder.fromStructBuilder,
         };
     };
@@ -974,8 +974,8 @@ pub const Calculator = struct {
                 return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
             }
 
-            pub fn result(self: @This()) i32 {
-                return self.reader.readIntField(i32, 0) ^ 0;
+            pub fn result(self: @This()) capnp.Error!_Root.Calculator.IntExpr.Reader {
+                return try self.reader.readPtrField(_Root.Calculator.IntExpr.Reader, 0);
             }
         };
 
@@ -994,18 +994,18 @@ pub const Calculator = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
-            pub fn result(self: @This()) i32 {
-                return self.builder.readIntField(i32, 0) ^ 0;
+            pub fn result(self: @This()) _Root.Calculator.IntExpr.Builder {
+                return self.builder.buildPtrField(_Root.Calculator.IntExpr.Builder, 0);
             }
 
-            pub fn setResult(self: @This(), v: i32) void {
-                self.builder.writeIntField(i32, 0, v ^ 0);
+            pub fn setResult(self: @This()) _Root.Calculator.IntExpr.Builder {
+                return self.builder.buildPtrField(_Root.Calculator.IntExpr.Builder, 0);
             }
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
-            .data_words = 1,
-            .ptr_words = 0,
+            .data_words = 0,
+            .ptr_words = 1,
             .builder = @This().Builder.fromStructBuilder,
         };
     };
@@ -1101,5 +1101,172 @@ pub const Calculator = struct {
                 else => return error.MethodNotFound,
             }
         }
+    };
+    pub const IntExpr = struct {
+        pub const id: u64 = 0xbbf10330814fd4c8;
+
+        pub const Reader = capnp.AnyPointerReader;
+        pub const Builder = capnp.AnyPointerBuilder;
+
+        pub const Method = enum(u16) {
+            eval = 0,
+            _,
+        };
+
+        pub const EvalParams = struct {
+            pub const id: u64 = 0xc84bcc41f7c83707;
+
+            pub const Reader = struct {
+                reader: capnp.StructReader,
+
+                pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                    return .{ .reader = capnp_reader };
+                }
+
+                pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
+                }
+
+                pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                    return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
+                }
+            };
+
+            pub const reader_trait = capnp.ReaderTrait(@This().Reader){
+                .reader = @This().Reader.fromStructReader,
+            };
+
+            pub const Builder = struct {
+                builder: capnp.StructBuilder,
+
+                pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                    return .{ .builder = capnp_builder };
+                }
+
+                pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+                }
+            };
+
+            pub const builder_trait = capnp.BuilderTrait(@This().Builder){
+                .data_words = 0,
+                .ptr_words = 0,
+                .builder = @This().Builder.fromStructBuilder,
+            };
+        };
+
+        pub const EvalResults = struct {
+            pub const id: u64 = 0xf7088a5c298c11df;
+
+            pub const Reader = struct {
+                reader: capnp.StructReader,
+
+                pub fn fromStructReader(capnp_reader: capnp.StructReader) @This() {
+                    return .{ .reader = capnp_reader };
+                }
+
+                pub fn fromReadContext(capnp_context: capnp.ReadContext) capnp.Error!@This() {
+                    return @This().fromStructReader(try capnp.StructReader.fromReadContext(capnp_context));
+                }
+
+                pub fn fromNull(capnp_context: capnp.ReadContext) @This() {
+                    return @This().fromStructReader(capnp.StructReader.fromNull(capnp_context));
+                }
+
+                pub fn value(self: @This()) i32 {
+                    return self.reader.readIntField(i32, 0) ^ 0;
+                }
+            };
+
+            pub const reader_trait = capnp.ReaderTrait(@This().Reader){
+                .reader = @This().Reader.fromStructReader,
+            };
+
+            pub const Builder = struct {
+                builder: capnp.StructBuilder,
+
+                pub fn fromStructBuilder(capnp_builder: capnp.StructBuilder) @This() {
+                    return .{ .builder = capnp_builder };
+                }
+
+                pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
+                    return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+                }
+
+                pub fn value(self: @This()) i32 {
+                    return self.builder.readIntField(i32, 0) ^ 0;
+                }
+
+                pub fn setValue(self: @This(), v: i32) void {
+                    self.builder.writeIntField(i32, 0, v ^ 0);
+                }
+            };
+
+            pub const builder_trait = capnp.BuilderTrait(@This().Builder){
+                .data_words = 1,
+                .ptr_words = 0,
+                .builder = @This().Builder.fromStructBuilder,
+            };
+        };
+
+        pub const EvalRequest = struct {
+            request: _capnp_rpc.Request,
+
+            pub fn params(self: *@This()) !EvalParams.Builder {
+                return try self.request.initParams(EvalParams.Builder, EvalParams.builder_trait);
+            }
+
+            pub fn addCapability(self: *@This(), capability: _capnp_rpc.Capability) !u32 {
+                return self.request.addCapability(capability);
+            }
+
+            pub fn start(self: *@This()) !_capnp_rpc.Promise {
+                return self.request.start();
+            }
+
+            pub fn send(self: *@This()) !_capnp_rpc.Response {
+                return self.request.send();
+            }
+
+            pub fn deinit(self: *@This()) void {
+                self.request.deinit();
+            }
+        };
+
+        pub const Client = struct {
+            capability: _capnp_rpc.Capability,
+
+            pub fn fromCapability(capability: _capnp_rpc.Capability) @This() {
+                return .{ .capability = capability };
+            }
+            pub fn eval(self: @This()) !EvalRequest {
+                return .{ .request = try self.capability.beginCall(0xbbf10330814fd4c8, 0) };
+            }
+        };
+
+        pub const Server = struct {
+            context: *anyopaque,
+            vtable: VTable,
+
+            pub const VTable = struct {
+                eval: *const fn (context: *anyopaque, params: EvalParams.Reader, results: EvalResults.Builder, capnp_call: _capnp_rpc.Call) anyerror!void,
+            };
+
+            pub fn localCapability(self: *@This()) _capnp_rpc.LocalCapability {
+                return .{ .context = self, .interface_id = 0xbbf10330814fd4c8, .dispatch = dispatch };
+            }
+
+            fn dispatch(capnp_context: *anyopaque, capnp_method_id: u16, capnp_call: _capnp_rpc.Call) anyerror!void {
+                const self: *@This() = @ptrCast(@alignCast(capnp_context));
+                switch (capnp_method_id) {
+                    0 => {
+                        const params = try capnp_call.params.asStruct(EvalParams.Reader, EvalParams.reader_trait);
+                        const results = try capnp_call.results.initStruct(EvalResults.Builder, EvalResults.builder_trait);
+                        return self.vtable.eval(self.context, params, results, capnp_call);
+                    },
+                    else => return error.MethodNotFound,
+                }
+            }
+        };
     };
 };

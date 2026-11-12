@@ -46,6 +46,9 @@ const ProviderInterface = struct {
             },
             1 => {
                 if (call.capabilities.len != 1) return error.MissingCapability;
+                // The params content must survive adding a capability to the
+                // request's cap table.
+                if (try call.params.asCapability() != 0) return error.UnexpectedParams;
 
                 var request = try call.connection.beginCall(call.capabilities[0], EchoInterface.id, 0);
                 defer request.deinit();
@@ -83,6 +86,49 @@ fn recordDisembargo(context: *anyopaque, embargo_id: u32) void {
 const ProviderState = struct {
     echo: connection.LocalCapability,
     promise: ?connection.Capability = null,
+};
+
+const PipelineInterface = struct {
+    const id: u64 = 0x9d7a02c4e8b1635f;
+
+    fn dispatch(context: *anyopaque, method_id: u16, call: connection.Call) anyerror!void {
+        const state: *ProviderState = @ptrCast(@alignCast(context));
+        switch (method_id) {
+            0 => {
+                // Wait for a client-provided capability before returning a
+                // local capability. This keeps the handler busy long enough
+                // for a dependent pipelined call to arrive.
+                if (call.capabilities.len != 1) return error.MissingCapability;
+
+                var echo_request = try call.connection.beginCall(call.capabilities[0], EchoInterface.id, 0);
+                defer echo_request.deinit();
+                var echo_params = try echo_request.params();
+                try echo_params.content().setText("wait");
+                var echo_response = try echo_request.send();
+                defer echo_response.deinit(call.connection.allocator);
+                const echo_payload = try echo_response.payload();
+                _ = try (try echo_payload.content()).asText();
+
+                const index = try call.addResultCapability(.{ .local = state.echo });
+                call.results.setCapability(index);
+            },
+            1 => {
+                // The capability parameter is the promised result of method 0.
+                // It is resolved locally by the time this call is dispatched.
+                if (call.capabilities.len != 1) return error.MissingCapability;
+
+                var echo_request = try call.connection.beginCall(call.capabilities[0], EchoInterface.id, 0);
+                defer echo_request.deinit();
+                var echo_params = try echo_request.params();
+                try echo_params.content().setText("pipelined");
+                var echo_response = try echo_request.send();
+                defer echo_response.deinit(call.connection.allocator);
+                const echo_payload = try echo_response.payload();
+                try call.results.setText(try (try echo_payload.content()).asText());
+            },
+            else => return error.MethodNotFound,
+        }
+    }
 };
 
 test "generated RPC protocol bindings compile" {
@@ -590,4 +636,84 @@ test "receiverAnswer descriptor resolves against the answer table" {
 
     var initial_response = try pending.wait();
     defer initial_response.deinit(testing.allocator);
+}
+
+test "local capability call" {
+    var loopback = connection.transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    var conn = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer conn.deinit();
+
+    const local_echo = connection.LocalCapability{
+        .context = undefined,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    };
+
+    var request = try conn.beginCall(.{ .local = local_echo }, EchoInterface.id, 0);
+    defer request.deinit();
+    var params = try request.params();
+    try params.content().setText("local");
+    var response = try request.send();
+    defer response.deinit(testing.allocator);
+
+    const payload = try response.payload();
+    try testing.expectEqualStrings("local", try (try payload.content()).asText());
+}
+
+test "pipelined capability parameter is deferred and called locally" {
+    var loopback = connection.transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    var server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer server.deinit();
+
+    var client = try connection.Connection.init(testing.allocator, loopback.endpoint(.client));
+    defer client.deinit();
+
+    client.peer = &server;
+    server.peer = &client;
+
+    var state = ProviderState{ .echo = .{
+        .context = undefined,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    server.setBootstrap(.{ .local = .{
+        .context = &state,
+        .interface_id = PipelineInterface.id,
+        .dispatch = PipelineInterface.dispatch,
+    } });
+
+    const provider = try client.bootstrap();
+
+    const client_echo = connection.LocalCapability{
+        .context = undefined,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    };
+
+    var first_request = try client.beginCall(provider, PipelineInterface.id, 0);
+    defer first_request.deinit();
+    const first_cap = try first_request.addCapability(.{ .local = client_echo });
+    var first_params = try first_request.params();
+    first_params.content().setCapability(first_cap);
+
+    var pending = try first_request.start();
+
+    var second_request = try client.beginCall(provider, PipelineInterface.id, 1);
+    defer second_request.deinit();
+    const second_cap = try second_request.addCapability(try pending.capability(null));
+    var second_params = try second_request.params();
+    second_params.content().setCapability(second_cap);
+
+    var second_response = try second_request.send();
+    defer second_response.deinit(testing.allocator);
+
+    const second_payload = try second_response.payload();
+    try testing.expectEqualStrings("pipelined", try (try second_payload.content()).asText());
+
+    var first_response = try pending.wait();
+    defer first_response.deinit(testing.allocator);
 }

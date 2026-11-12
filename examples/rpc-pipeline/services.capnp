@@ -12,6 +12,9 @@ interface Greeter {
 }
 
 interface Calculator {
-  add @0 (a :Int32, b :Int32) -> (result :Int32);
-  multiply @1 (a :Int32, b :Int32) -> (result :Int32);
+  interface IntExpr {
+    eval @0 () -> (value :Int32);
+  }
+  add @0 (a :IntExpr, b :IntExpr) -> (result :IntExpr);
+  multiply @1 (a :IntExpr, b :IntExpr) -> (result :IntExpr);
 }

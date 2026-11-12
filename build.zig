@@ -251,6 +251,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    b.installArtifact(example_rpc_pipeline_client);
     const run_example_rpc_pipeline_client = b.addRunArtifact(example_rpc_pipeline_client);
     const run_rpc_pipeline_client_step = b.step("run-example-rpc-client", "Run the RPC pipeline client");
     run_rpc_pipeline_client_step.dependOn(&run_example_rpc_pipeline_client.step);
@@ -268,6 +269,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    b.installArtifact(example_rpc_pipeline_server);
     const run_example_rpc_pipeline_server = b.addRunArtifact(example_rpc_pipeline_server);
     const run_rpc_pipeline_server_step = b.step("run-example-rpc-server", "Run the RPC pipeline server");
     run_rpc_pipeline_server_step.dependOn(&run_example_rpc_pipeline_server.step);

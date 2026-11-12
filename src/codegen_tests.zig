@@ -298,14 +298,27 @@ test "generated generic struct round-trip" {
     try std.testing.expectEqual(@as(i32, 42), item_reader.n());
 }
 
-const TypedCalculator = struct {
-    fn add(
+const TypedValue = struct {
+    fn eval(
         _: *anyopaque,
-        params: interfaces.Calculator.AddParams.Reader,
-        results: interfaces.Calculator.AddResults.Builder,
+        _: interfaces.Calculator.Value.EvalParams.Reader,
+        results: interfaces.Calculator.Value.EvalResults.Builder,
         _: capnp_rpc.Call,
     ) anyerror!void {
-        results.setSum(params.a() + params.b());
+        results.setValue(42);
+    }
+};
+
+const TypedCalculator = struct {
+    fn add(
+        context: *anyopaque,
+        _: interfaces.Calculator.AddParams.Reader,
+        results: interfaces.Calculator.AddResults.Builder,
+        call: capnp_rpc.Call,
+    ) anyerror!void {
+        const value: *interfaces.Calculator.Value.Server = @ptrCast(@alignCast(context));
+        const index = try call.addResultCapability(.{ .local = value.localCapability() });
+        results.setSum().setCapability(index);
     }
 
     fn reset(
@@ -329,8 +342,14 @@ test "generated typed interface client and server" {
     client_connection.peer = &server_connection;
     server_connection.peer = &client_connection;
 
-    var server = interfaces.Calculator.Server{
+    var value_server = interfaces.Calculator.Value.Server{
         .context = undefined,
+        .vtable = .{
+            .eval = TypedValue.eval,
+        },
+    };
+    var server = interfaces.Calculator.Server{
+        .context = &value_server,
         .vtable = .{
             .add = TypedCalculator.add,
             .reset = TypedCalculator.reset,
@@ -354,7 +373,19 @@ test "generated typed interface client and server" {
         interfaces.Calculator.AddResults.Reader,
         interfaces.Calculator.AddResults.reader_trait,
     );
-    try std.testing.expectEqual(@as(i32, 42), results.sum());
+    const sum = try results.sum();
+    const value_capability = try response.capability(try sum.asCapability());
+    const value_client = interfaces.Calculator.Value.Client.fromCapability(value_capability);
+
+    var eval_request = try value_client.eval();
+    defer eval_request.deinit();
+    var eval_response = try eval_request.send();
+    defer eval_response.deinit(std.testing.allocator);
+    const eval_results = try eval_response.results(
+        interfaces.Calculator.Value.EvalResults.Reader,
+        interfaces.Calculator.Value.EvalResults.reader_trait,
+    );
+    try std.testing.expectEqual(@as(i32, 42), eval_results.value());
 }
 
 test "generated groups round-trip" {

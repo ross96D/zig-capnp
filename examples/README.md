@@ -47,7 +47,7 @@ interface Echo {
 }
 ```
 
-`rpc-pipeline/services.capnp` defines `Factory`, `Greeter`, and `Calculator`, with several methods each. `rpc-pipeline/main.zig` starts calls, obtains promised capabilities from `Request.start()` + `Promise.capability(0)`, and calls those capabilities before waiting for the originating result.
+`rpc-pipeline/services.capnp` defines `Factory`, `Greeter`, and `Calculator`. `main_server.zig` and `main_client.zig` demonstrate the two-process flow, while `main_in_process.zig` runs both ends over a loopback transport. The calculator methods take `IntExpr` capabilities, evaluate them, and return a new expression capability. The client also demonstrates pipelining via `Request.start()` + `Promise.capability(0)` and calls those capabilities before waiting for the originating result.
 
 ## Generated schema code
 

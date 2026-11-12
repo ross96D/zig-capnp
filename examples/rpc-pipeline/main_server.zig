@@ -1,6 +1,7 @@
 const std = @import("std");
 const capnp_rpc = @import("capnp_rpc");
 const schema = @import("generated/services.zig");
+const int_expr = @import("int_expr.zig");
 
 const socket_path = "/tmp/zig-capnp-rpc-pipeline.sock";
 
@@ -28,23 +29,49 @@ const GreeterImpl = struct {
     }
 };
 
+const CalculatorState = struct {
+    allocator: std.mem.Allocator,
+};
+
 const CalculatorImpl = struct {
     fn add(
-        _: *anyopaque,
+        context: *anyopaque,
         params: schema.Calculator.AddParams.Reader,
         results: schema.Calculator.AddResults.Builder,
-        _: capnp_rpc.Call,
+        call: capnp_rpc.Call,
     ) anyerror!void {
-        results.setResult(params.a() + params.b());
+        const state: *CalculatorState = @ptrCast(@alignCast(context));
+        const a = try int_expr.IntExpr.evalCapability(
+            call.connection,
+            try int_expr.capabilityForParam(call, try params.a()),
+        );
+        const b = try int_expr.IntExpr.evalCapability(
+            call.connection,
+            try int_expr.capabilityForParam(call, try params.b()),
+        );
+        const result = try int_expr.IntExpr.init(state.allocator, a + b);
+        const index = try call.addResultCapability(.{ .local = result.capability() });
+        results.result().setCapability(index);
     }
 
     fn multiply(
-        _: *anyopaque,
+        context: *anyopaque,
         params: schema.Calculator.MultiplyParams.Reader,
         results: schema.Calculator.MultiplyResults.Builder,
-        _: capnp_rpc.Call,
+        call: capnp_rpc.Call,
     ) anyerror!void {
-        results.setResult(params.a() * params.b());
+        const state: *CalculatorState = @ptrCast(@alignCast(context));
+        const a = try int_expr.IntExpr.evalCapability(
+            call.connection,
+            try int_expr.capabilityForParam(call, try params.a()),
+        );
+        const b = try int_expr.IntExpr.evalCapability(
+            call.connection,
+            try int_expr.capabilityForParam(call, try params.b()),
+        );
+        const result = try int_expr.IntExpr.init(state.allocator, a * b);
+        const index = try call.addResultCapability(.{ .local = result.capability() });
+        results.result().setCapability(index);
     }
 };
 
@@ -113,6 +140,9 @@ pub fn main() !void {
         var stream = accepted.?;
         defer stream.deinit();
 
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+
         var connection = try capnp_rpc.Connection.init(allocator, stream.endpoint(.server));
         defer connection.deinit();
 
@@ -123,8 +153,9 @@ pub fn main() !void {
                 .farewell = GreeterImpl.farewell,
             },
         };
+        var calculator_state = CalculatorState{ .allocator = arena.allocator() };
         var calculator_server = schema.Calculator.Server{
-            .context = undefined,
+            .context = &calculator_state,
             .vtable = .{
                 .add = CalculatorImpl.add,
                 .multiply = CalculatorImpl.multiply,
