@@ -42,6 +42,7 @@ const ProviderInterface = struct {
         const state: *ProviderState = @ptrCast(@alignCast(context));
         switch (method_id) {
             0 => {
+                state.calls += 1;
                 const index = try call.addLocalResultCapability(state.echo);
                 call.results.setCapability(index);
             },
@@ -117,7 +118,51 @@ const ProviderState = struct {
     echo: connection.LocalCapability,
     promise: ?connection.Capability = null,
     stored: ?connection.Capability = null,
+    calls: usize = 0,
 };
+
+fn scriptedPump(
+    client: *connection.Connection,
+    server: *connection.Connection,
+    link: *transports.Scripted,
+) !void {
+    while (true) {
+        var progressed = false;
+        while (try link.deliverNext(.client)) {
+            try server.step();
+            progressed = true;
+        }
+        while (try link.deliverNext(.server)) {
+            try client.step();
+            progressed = true;
+        }
+        if (!progressed) return;
+    }
+}
+
+fn messageIsReturnException(bytes: []const u8) !bool {
+    var message = try capnp.Message.fromBytes(bytes, testing.allocator);
+    defer message.deinit(testing.allocator);
+
+    const root = try message.getRootStruct(rpc.Message.Reader, rpc.Message.reader_trait);
+    const return_ = (try root.@"return"()) orelse return error.NotReturn;
+    return return_.which() == .exception;
+}
+
+fn scriptedBootstrap(
+    server: *connection.Connection,
+    client: *connection.Connection,
+    link: *transports.Scripted,
+    capability: connection.LocalCapability,
+) !connection.Capability {
+    server.setBootstrap(try server.initLocal(capability));
+
+    var promise = try client.bootstrapStart();
+    try scriptedPump(client, server, link);
+    const bootstrapped = try promise.wait();
+    try scriptedPump(client, server, link);
+    return bootstrapped;
+}
 
 const PipelineInterface = struct {
     const id: u64 = 0x9d7a02c4e8b1635f;
@@ -1752,4 +1797,280 @@ test "lifecycle deinit is idempotent" {
     promise.deinit();
     pending_request.deinit();
     pending_request.deinit();
+}
+
+test "scripted transport: Finish cancels a call queued behind a promise" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer provider.release();
+
+    var promise_request = try client.beginCall(provider, ProviderInterface.id, 2);
+    defer promise_request.deinit();
+    var promise_pending = try promise_request.start();
+    defer promise_pending.deinit();
+    try scriptedPump(client, server, &link);
+    var promise_response = try promise_pending.wait();
+    defer promise_response.deinit();
+    const promise = try promise_response.capability(0);
+    defer promise.release();
+    try scriptedPump(client, server, &link);
+
+    var queued_request = try client.beginCall(promise, ProviderInterface.id, 0);
+    defer queued_request.deinit();
+    var queued_pending = try queued_request.start();
+
+    // Deliver the call; it queues behind the unresolved promise.
+    _ = try link.deliverNext(.client);
+    try server.step();
+    try testing.expectEqual(@as(usize, 0), state.calls);
+
+    // Cancel the queued call before resolution.
+    queued_pending.deinit();
+    _ = try link.deliverNext(.client);
+    try server.step();
+
+    const resolved = try server.initLocal(.{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer resolved.release();
+    try server.resolvePromise(state.promise.?, resolved);
+    try scriptedPump(client, server, &link);
+
+    try testing.expectEqual(@as(usize, 0), state.calls);
+}
+
+test "scripted transport: late Return is ignored after cancellation" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = null,
+        .interface_id = TestInterface.id,
+        .dispatch = TestInterface.dispatch,
+    });
+    defer provider.release();
+
+    var request = try client.beginCall(provider, TestInterface.id, 0);
+    defer request.deinit();
+    var params = try request.params();
+    try params.content().setText("ping");
+    var pending = try request.start();
+
+    _ = try link.deliverNext(.client);
+    try server.step();
+    try testing.expectEqual(@as(usize, 1), link.outboxLen(.server));
+
+    pending.deinit();
+    try testing.expectEqual(@as(usize, 0), client.questions.count());
+
+    _ = try link.deliverNext(.server);
+    try client.step();
+    try testing.expectEqual(@as(usize, 0), client.returns.count());
+}
+
+test "scripted transport: duplicate questions and unknown exports are rejected" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = null,
+        .interface_id = TestInterface.id,
+        .dispatch = TestInterface.dispatch,
+    });
+    defer provider.release();
+
+    var request = try client.beginCall(provider, TestInterface.id, 0);
+    defer request.deinit();
+    var params = try request.params();
+    try params.content().setText("ping");
+    var pending = try request.start();
+    defer pending.deinit();
+
+    const call_bytes = (try link.takeOutbox(.client)).?;
+    defer testing.allocator.free(call_bytes);
+
+    try link.pushInbox(.server, try testing.allocator.dupe(u8, call_bytes));
+    try server.step();
+    try link.pushInbox(.server, try testing.allocator.dupe(u8, call_bytes));
+    try server.step();
+
+    var exception_count: usize = 0;
+    while (try link.takeOutbox(.server)) |bytes| {
+        defer testing.allocator.free(bytes);
+        if (try messageIsReturnException(bytes)) exception_count += 1;
+    }
+    try testing.expectEqual(@as(usize, 1), exception_count);
+
+    // An unknown imported capability id must also return an exception.
+    var message = capnp.MessageBuilder{ .allocator = testing.allocator };
+    try message.init();
+    defer message.deinit();
+
+    var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
+    var call = try root.setCall();
+    call.setQuestionId(0x1234);
+    var target = try call.target();
+    target.setImportedCap(0xdead);
+    call.setInterfaceId(TestInterface.id);
+    call.setMethodId(0);
+
+    const unknown_bytes = try message.toBytes(testing.allocator);
+    try link.pushInbox(.server, unknown_bytes);
+    try server.step();
+
+    const unknown_response = (try link.takeOutbox(.server)).?;
+    defer testing.allocator.free(unknown_response);
+    try testing.expect(try messageIsReturnException(unknown_response));
+}
+
+test "scripted transport: late Resolve after import release is harmless" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer provider.release();
+
+    var promise_request = try client.beginCall(provider, ProviderInterface.id, 2);
+    defer promise_request.deinit();
+    var promise_pending = try promise_request.start();
+    defer promise_pending.deinit();
+    try scriptedPump(client, server, &link);
+    var promise_response = try promise_pending.wait();
+    defer promise_response.deinit();
+    const promise = try promise_response.capability(0);
+    const promise_import_id = promise.imported.export_id;
+    promise.release();
+    try testing.expect(client.imports.get(promise_import_id) == null);
+
+    // Deliver the Release, then resolve the export after the client forgot it.
+    try scriptedPump(client, server, &link);
+
+    const resolved = try server.initLocal(.{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer resolved.release();
+    try server.resolvePromise(state.promise.?, resolved);
+    try scriptedPump(client, server, &link);
+
+    try testing.expect(client.imports.get(promise_import_id) == null);
+}
+
+test "scripted transport: pipelined calls survive explicit message ordering" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer provider.release();
+
+    var promise_request = try client.beginCall(provider, ProviderInterface.id, 2);
+    defer promise_request.deinit();
+    var promise_pending = try promise_request.start();
+    defer promise_pending.deinit();
+    try scriptedPump(client, server, &link);
+    var promise_response = try promise_pending.wait();
+    defer promise_response.deinit();
+    const promise = try promise_response.capability(0);
+    defer promise.release();
+    try scriptedPump(client, server, &link);
+
+    var queued_request = try client.beginCall(promise, ProviderInterface.id, 0);
+    defer queued_request.deinit();
+    var queued_pending = try queued_request.start();
+    _ = try link.deliverNext(.client);
+    try server.step();
+
+    const answer_cap = try queued_pending.capability(null);
+    defer answer_cap.release();
+    var pipelined_request = try client.beginCall(answer_cap, EchoInterface.id, 0);
+    defer pipelined_request.deinit();
+    var pipelined_params = try pipelined_request.params();
+    try pipelined_params.content().setText("scripted-pipeline");
+    var pipelined_pending = try pipelined_request.start();
+
+    _ = try link.deliverNext(.client);
+    try server.step();
+
+    const resolved = try server.initLocal(.{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer resolved.release();
+    try server.resolvePromise(state.promise.?, resolved);
+    try scriptedPump(client, server, &link);
+
+    var pipelined_response = try pipelined_pending.wait();
+    defer pipelined_response.deinit();
+    const pipelined_payload = try pipelined_response.payload();
+    try testing.expectEqualStrings(
+        "scripted-pipeline",
+        try (try pipelined_payload.content()).asText(),
+    );
+
+    var queued_response = try queued_pending.wait();
+    defer queued_response.deinit();
+    try testing.expectEqual(@as(usize, 1), state.calls);
 }

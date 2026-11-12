@@ -4,6 +4,7 @@ pub const Transport = @import("../transport.zig").Transport;
 pub const Side = @import("../transport.zig").Side;
 
 pub const Loopback = @import("in_memory.zig").Loopback;
+pub const Scripted = @import("scripted.zig").Scripted;
 
 /// The Unix transport currently uses raw Linux syscalls. Keep the core runtime
 /// portable by only compiling it on Linux.

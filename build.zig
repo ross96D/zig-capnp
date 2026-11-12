@@ -173,6 +173,25 @@ pub fn build(b: *std.Build) void {
 
     const run_rpc_tests = b.addRunArtifact(rpc_tests);
 
+    const bench_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/bench/rpc.zig"),
+        .imports = &.{
+            .{ .name = "capnp", .module = capnp_mod },
+            .{ .name = "capnp_rpc", .module = capnp_rpc_mod },
+        },
+    });
+
+    const rpc_bench = b.addExecutable(.{
+        .name = "rpc-bench",
+        .root_module = bench_mod,
+    });
+
+    const run_rpc_bench = b.addRunArtifact(rpc_bench);
+    const bench_step = b.step("bench", "Run RPC benchmarks");
+    bench_step.dependOn(&run_rpc_bench.step);
+
     const example_build_message = b.addExecutable(.{
         .name = "example-build-message",
         .root_module = b.createModule(.{
