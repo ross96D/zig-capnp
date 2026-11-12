@@ -187,6 +187,10 @@ const AnswerCapability = struct {
 
 const AnswerState = struct {
     resolved_bytes: ?[]u8 = null,
+    /// True once the original Call for this question has been received and is
+    /// either dispatching or queued behind a promise. Placeholder entries
+    /// created for pipelining have this false.
+    call_received: bool = false,
     pending: std.ArrayList(PendingCall) = .empty,
     /// Export ids created while encoding this answer's cap table.
     export_ids: std.ArrayList(u32) = .empty,
@@ -528,6 +532,10 @@ pub const Request = struct {
 
     pub fn send(self: *Request) !Response {
         var promise = try self.start();
+        // `wait` transfers the question reference into the returned Response
+        // on success. On failure the promise still owns it, so release it
+        // (which also sends Finish) rather than leaking the question.
+        defer promise.deinit();
         return promise.wait();
     }
 
@@ -633,7 +641,12 @@ pub const BootstrapPromise = struct {
     pub fn wait(self: *BootstrapPromise) !Capability {
         if (self.finished) return error.AlreadyFinished;
         const question = self.question orelse return error.AlreadyFinished;
-        var response = try self.connection.waitReturn(question.id);
+        var response = self.connection.waitReturn(question.id) catch |err| {
+            self.question = null;
+            self.finished = true;
+            question.release();
+            return err;
+        };
         defer response.deinit();
 
         const bootstrap_capability = self.connection.finishBootstrap(&response) catch |err| {
@@ -655,7 +668,12 @@ pub const BootstrapPromise = struct {
     pub fn tryTake(self: *BootstrapPromise) !?Capability {
         if (self.finished) return error.AlreadyFinished;
         const question = self.question orelse return error.AlreadyFinished;
-        const response = (try self.connection.takeReturn(question.id)) orelse return null;
+        const response = (self.connection.takeReturn(question.id) catch |err| {
+            self.question = null;
+            self.finished = true;
+            question.release();
+            return err;
+        }) orelse return null;
         var result = response;
         defer result.deinit();
 
@@ -794,6 +812,7 @@ pub const Connection = struct {
             var question_it = self.questions.valueIterator();
             const question = question_it.next().?.*;
             _ = self.questions.remove(question.id);
+            question.param_export_ids.deinit(self.allocator);
             self.allocator.destroy(question);
         }
         self.questions.deinit();
@@ -1036,10 +1055,24 @@ pub const Connection = struct {
 
         for (pending.items) |item| {
             _ = self.queued_questions.remove(item.question_id);
+            // The placeholder answer entry was created when the call was
+            // queued. Let the replay claim it again without tripping the
+            // duplicate-question check, while preserving any pipelined calls
+            // already attached to it.
+            if (self.answers.getPtr(item.question_id)) |answer| answer.call_received = false;
             self.handle(item.bytes) catch |err| {
+                // If replay failed before the answer could be claimed again,
+                // keep treating the question as received so a duplicate Call
+                // cannot overwrite the entry.
+                if (self.answers.getPtr(item.question_id)) |answer| answer.call_received = true;
                 self.sendException(item.question_id, err, true) catch {};
             };
         }
+
+        // Replayed calls may have attached pipelined calls while dispatching.
+        // Those get deferred because dispatch_depth is nonzero; drain them now
+        // that we are back at the top level.
+        if (self.dispatch_depth == 0) try self.drainDeferredCalls();
 
         self.maybeDestroyExport(entry);
     }
@@ -1146,6 +1179,18 @@ pub const Connection = struct {
         method_id: u16,
     ) !Request {
         if (entry.connection != self) return error.WrongConnection;
+
+        // An AnswerCapability with a null `question` refers to an answer we
+        // owe the peer (created from a `receiverAnswer` descriptor), not to an
+        // outstanding question of ours. It must be resolved locally; sending
+        // `promisedAnswer` back over the wire would address the wrong table.
+        if (entry.question == null) {
+            const answer = self.answers.getPtr(entry.question_id) orelse return error.UnknownAnswer;
+            const bytes = answer.resolved_bytes orelse return error.AnswerNotReady;
+            const capability = try self.resolveAnswerCapabilityField(bytes, entry.pointer_field);
+            defer capability.release();
+            return self.beginCall(capability, interface_id, method_id);
+        }
 
         const question = try self.newQuestion();
         errdefer self.destroyQuestion(question);
@@ -1371,6 +1416,7 @@ pub const Connection = struct {
         cap_table.get(0).setSenderHosted(export_id);
 
         const answer = try self.ensureAnswer(question_id);
+        answer.call_received = true;
         try answer.export_ids.append(self.allocator, export_id);
 
         const bytes = try message.toBytes(self.allocator);
@@ -1382,9 +1428,15 @@ pub const Connection = struct {
 
     fn handleCall(self: *Connection, call: rpc.Call.Reader, bytes: []const u8) !void {
         const question_id = call.questionId();
-        if (self.answers.contains(question_id) or self.queued_questions.contains(question_id)) {
+        if (self.queued_questions.contains(question_id)) {
             try self.sendException(question_id, error.DuplicateQuestion, true);
             return;
+        }
+        if (self.answers.getPtr(question_id)) |answer| {
+            if (answer.call_received) {
+                try self.sendException(question_id, error.DuplicateQuestion, true);
+                return;
+            }
         }
         const target = try call.target();
 
@@ -1404,31 +1456,11 @@ pub const Connection = struct {
         };
 
         if (entry.is_promise) {
-            try self.queued_questions.put(question_id, {});
-            const copy = try self.allocator.dupe(u8, bytes);
-            errdefer self.allocator.free(copy);
-            try entry.pending_calls.append(self.allocator, .{
-                .question_id = question_id,
-                .bytes = copy,
-            });
+            try self.queuePromiseCall(entry, question_id, bytes);
             return;
         }
 
-        switch (entry.capability) {
-            .local => |local| try self.dispatchLocalCall(call, local.capability, question_id, null, null, null),
-            .imported => {
-                try self.sendException(question_id, error.ForwardingUnsupported, true);
-                return;
-            },
-            .promised, .promised_answer => {
-                try self.sendException(question_id, error.UnsupportedTarget, true);
-                return;
-            },
-            .none => {
-                try self.sendException(question_id, error.UnknownCapability, true);
-                return;
-            },
-        }
+        try self.deliverCall(call, entry.capability, question_id, bytes);
     }
 
     fn handlePromisedCall(
@@ -1447,13 +1479,7 @@ pub const Connection = struct {
         };
 
         if (entry.resolved_bytes == null) {
-            try self.queued_questions.put(question_id, {});
-            const copy = try self.allocator.dupe(u8, bytes);
-            errdefer self.allocator.free(copy);
-            try entry.pending.append(self.allocator, .{
-                .question_id = question_id,
-                .bytes = copy,
-            });
+            try self.queueAnswerCall(entry, question_id, bytes);
             return;
         }
 
@@ -1463,9 +1489,80 @@ pub const Connection = struct {
         };
         defer capability.release();
 
-        switch (capability) {
+        try self.deliverCall(call, capability, question_id, bytes);
+    }
+
+    /// Queue a call behind an unresolved promise export. The answer entry is
+    /// created eagerly so calls pipelined on this question can be queued in
+    /// `AnswerState.pending` before the promise resolves.
+    fn queuePromiseCall(
+        self: *Connection,
+        entry: *ExportEntry,
+        question_id: u32,
+        bytes: []const u8,
+    ) !void {
+        const copy = try self.allocator.dupe(u8, bytes);
+        errdefer self.allocator.free(copy);
+
+        try entry.pending_calls.append(self.allocator, .{
+            .question_id = question_id,
+            .bytes = copy,
+        });
+        errdefer _ = entry.pending_calls.pop();
+
+        try self.queued_questions.put(question_id, {});
+        errdefer _ = self.queued_questions.remove(question_id);
+
+        const answer = try self.ensureAnswer(question_id);
+        answer.call_received = true;
+    }
+
+    /// Queue a pipelined call until the answer it depends on is resolved.
+    fn queueAnswerCall(
+        self: *Connection,
+        answer: *AnswerState,
+        question_id: u32,
+        bytes: []const u8,
+    ) !void {
+        const copy = try self.allocator.dupe(u8, bytes);
+        errdefer self.allocator.free(copy);
+
+        try answer.pending.append(self.allocator, .{
+            .question_id = question_id,
+            .bytes = copy,
+        });
+        errdefer _ = answer.pending.pop();
+
+        try self.queued_questions.put(question_id, {});
+        errdefer _ = self.queued_questions.remove(question_id);
+    }
+
+    /// Deliver an incoming Call to a resolved target capability. Used both for
+    /// direct `importedCap` targets and for targets resolved from pipelined
+    /// answers. `.promised` handles are queued or unwrapped as needed.
+    fn deliverCall(
+        self: *Connection,
+        call: rpc.Call.Reader,
+        target: Capability,
+        question_id: u32,
+        bytes: []const u8,
+    ) anyerror!void {
+        switch (target) {
             .local => |local| try self.dispatchLocalCall(call, local.capability, question_id, null, null, null),
-            else => try self.sendException(question_id, error.UnsupportedPromisedTarget, true),
+            .promised => |entry| {
+                if (entry.connection != self) {
+                    try self.sendException(question_id, error.ForeignCapability, true);
+                    return;
+                }
+                if (entry.is_promise) {
+                    try self.queuePromiseCall(entry, question_id, bytes);
+                    return;
+                }
+                try self.deliverCall(call, entry.capability, question_id, bytes);
+            },
+            .imported => try self.sendException(question_id, error.ForwardingUnsupported, true),
+            .promised_answer => try self.sendException(question_id, error.UnsupportedPromisedTarget, true),
+            .none => try self.sendException(question_id, error.UnknownCapability, true),
         }
     }
 
@@ -1509,6 +1606,7 @@ pub const Connection = struct {
 
         if (local_sink == null) {
             const answer = try self.ensureAnswer(question_id);
+            answer.call_received = true;
             for (params_caps) |capability| {
                 try answer.held_caps.append(self.allocator, capability.retain());
             }
@@ -1615,10 +1713,22 @@ pub const Connection = struct {
         entry.pending = .empty;
         defer pending.deinit(self.allocator);
 
-        for (pending.items) |item| {
-            defer self.allocator.free(item.bytes);
+        // Free every entry that was not successfully replayed, including the
+        // current one when `handle` fails partway through the drain.
+        var handled: usize = 0;
+        defer {
+            for (pending.items[handled..]) |item| {
+                _ = self.queued_questions.remove(item.question_id);
+                self.allocator.free(item.bytes);
+            }
+        }
+
+        while (handled < pending.items.len) {
+            const item = pending.items[handled];
             _ = self.queued_questions.remove(item.question_id);
             try self.handle(item.bytes);
+            self.allocator.free(item.bytes);
+            handled += 1;
         }
     }
 
@@ -1657,6 +1767,39 @@ pub const Connection = struct {
         return self.decodeAnswerCapability(cap_table.get(cap_index));
     }
 
+    fn resolveAnswerCapabilityField(
+        self: *Connection,
+        answer_bytes: []const u8,
+        pointer_field: ?u16,
+    ) !Capability {
+        var message = try capnp.Message.fromBytes(answer_bytes, self.allocator);
+        defer message.deinit(self.allocator);
+
+        const root = try message.getRootStruct(rpc.Message.Reader, rpc.Message.reader_trait);
+        const return_ = (try root.@"return"()) orelse return error.InvalidAnswer;
+        const payload = (try return_.results()) orelse return error.InvalidAnswer;
+
+        var value = try payload.content();
+        if (pointer_field) |field| {
+            switch (value.ptr) {
+                .struct_ => |struct_| {
+                    const reader = capnp.StructReader{
+                        .context = value.context,
+                        .data_words = struct_.data_words,
+                        .ptr_words = struct_.ptr_words,
+                    };
+                    value = try reader.readPtrField(capnp.AnyPointerReader, field);
+                },
+                else => return error.InvalidPointer,
+            }
+        }
+
+        const cap_index = try value.asCapability();
+        const cap_table = try payload.capTable();
+        if (cap_index >= cap_table.length) return error.InvalidCapability;
+        return self.decodeAnswerCapability(cap_table.get(cap_index));
+    }
+
     fn decodeAnswerCapability(self: *Connection, descriptor: rpc.CapDescriptor.Reader) !Capability {
         if (descriptor.none() != null) return .none;
 
@@ -1666,8 +1809,12 @@ pub const Connection = struct {
         }
 
         if (descriptor.senderPromise()) |export_id| {
+            // Preserve the promise identity. If it is still unresolved, calls
+            // on this capability must queue on the export instead of being
+            // decoded as `.none`.
             const entry = self.exports.get(export_id) orelse return error.UnknownCapability;
-            return entry.capability.retain();
+            entry.handle_refs += 1;
+            return .{ .promised = entry };
         }
 
         if (descriptor.receiverHosted()) |export_id| {

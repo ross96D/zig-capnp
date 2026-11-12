@@ -88,6 +88,14 @@ const ProviderInterface = struct {
                 _ = try call.addLocalResultCapability(state.echo);
                 call.results.setCapability(0);
             },
+            6 => {
+                // Store a borrowed capability parameter for later use by the
+                // test after the capability's answer resolves.
+                if (call.capabilities.len != 1) return error.MissingCapability;
+                if (state.stored) |old| old.release();
+                state.stored = call.capabilities[0].retain();
+                try call.results.setText("stored");
+            },
             else => return error.MethodNotFound,
         }
     }
@@ -101,6 +109,7 @@ fn recordDisembargo(context: *anyopaque, embargo_id: u32) void {
 const ProviderState = struct {
     echo: connection.LocalCapability,
     promise: ?connection.Capability = null,
+    stored: ?connection.Capability = null,
 };
 
 const PipelineInterface = struct {
@@ -412,6 +421,305 @@ test "promise export queues calls until resolved" {
 
     const payload = try queued_response.payload();
     try testing.expectEqualStrings("after-resolve", try (try payload.content()).asText());
+}
+
+test "pipelined call on an answer queued behind a promise" {
+    var loopback = transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    var server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer server.deinit();
+
+    var client = try connection.Connection.init(testing.allocator, loopback.endpoint(.client));
+    defer client.deinit();
+
+    client.peer = server;
+    server.peer = client;
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    server.setBootstrap(try server.initLocal(.{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    }));
+
+    const provider = try client.bootstrap();
+    defer provider.release();
+
+    // Obtain a promise export from the server.
+    var promise_request = try client.beginCall(provider, ProviderInterface.id, 2);
+    defer promise_request.deinit();
+    var promise_response = try promise_request.send();
+    defer promise_response.deinit();
+    const promise = try promise_response.capability(0);
+    defer promise.release();
+
+    // This call queues on the unresolved promise, creating a placeholder
+    // answer entry on the server.
+    var queued_request = try client.beginCall(promise, ProviderInterface.id, 0);
+    defer queued_request.deinit();
+    var queued_pending = try queued_request.start();
+    defer queued_pending.deinit();
+
+    // Pipeline a call on the queued call's result before the server has been
+    // able to produce it.
+    const answer_cap = try queued_pending.capability(null);
+    defer answer_cap.release();
+    var pipelined_request = try client.beginCall(answer_cap, EchoInterface.id, 0);
+    defer pipelined_request.deinit();
+    var pipelined_params = try pipelined_request.params();
+    try pipelined_params.content().setText("pipelined-behind-promise");
+    var pipelined_pending = try pipelined_request.start();
+    defer pipelined_pending.deinit();
+
+    const resolved = try server.initLocal(.{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer resolved.release();
+    try server.resolvePromise(state.promise.?, resolved);
+
+    var pipelined_response = try pipelined_pending.wait();
+    defer pipelined_response.deinit();
+    const pipelined_payload = try pipelined_response.payload();
+    try testing.expectEqualStrings(
+        "pipelined-behind-promise",
+        try (try pipelined_payload.content()).asText(),
+    );
+
+    var queued_response = try queued_pending.wait();
+    defer queued_response.deinit();
+}
+
+test "pipelining through a promise result before it resolves" {
+    var loopback = transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    var server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer server.deinit();
+
+    var client = try connection.Connection.init(testing.allocator, loopback.endpoint(.client));
+    defer client.deinit();
+
+    client.peer = server;
+    server.peer = client;
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    server.setBootstrap(try server.initLocal(.{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    }));
+
+    const provider = try client.bootstrap();
+    defer provider.release();
+
+    // This call's result is itself a promise export.
+    var request = try client.beginCall(provider, ProviderInterface.id, 2);
+    defer request.deinit();
+    var pending = try request.start();
+    defer pending.deinit();
+
+    // Pipeline on the result before that promise is resolved.
+    const answer_cap = try pending.capability(null);
+    defer answer_cap.release();
+    var pipelined_request = try client.beginCall(answer_cap, EchoInterface.id, 0);
+    defer pipelined_request.deinit();
+    var pipelined_params = try pipelined_request.params();
+    try pipelined_params.content().setText("through-promise-result");
+    var pipelined_pending = try pipelined_request.start();
+    defer pipelined_pending.deinit();
+
+    const resolved = try server.initLocal(state.echo);
+    defer resolved.release();
+    try server.resolvePromise(state.promise.?, resolved);
+
+    var pipelined_response = try pipelined_pending.wait();
+    defer pipelined_response.deinit();
+    const pipelined_payload = try pipelined_response.payload();
+    try testing.expectEqualStrings(
+        "through-promise-result",
+        try (try pipelined_payload.content()).asText(),
+    );
+
+    var response = try pending.wait();
+    defer response.deinit();
+}
+
+test "receiverAnswer queued behind a promise dispatches locally once resolved" {
+    var loopback = transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    var server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer server.deinit();
+
+    var client = try connection.Connection.init(testing.allocator, loopback.endpoint(.client));
+    defer client.deinit();
+
+    client.peer = server;
+    server.peer = client;
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    server.setBootstrap(try server.initLocal(.{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    }));
+
+    const provider = try client.bootstrap();
+    defer provider.release();
+
+    var promise_request = try client.beginCall(provider, ProviderInterface.id, 2);
+    defer promise_request.deinit();
+    var promise_response = try promise_request.send();
+    defer promise_response.deinit();
+    const promise = try promise_response.capability(0);
+    defer promise.release();
+
+    // Queue a call behind the promise. Its answer is not available yet.
+    var queued_request = try client.beginCall(promise, ProviderInterface.id, 0);
+    defer queued_request.deinit();
+    var queued_pending = try queued_request.start();
+    defer queued_pending.deinit();
+
+    // Pass the promised answer back as a parameter. The server stores the
+    // unresolved handle instead of dispatching it over the wire.
+    const answer_cap = try queued_pending.capability(null);
+    defer answer_cap.release();
+    var store_request = try client.beginCall(provider, ProviderInterface.id, 6);
+    defer store_request.deinit();
+    const index = try store_request.addCapability(answer_cap);
+    var store_params = try store_request.params();
+    store_params.content().setCapability(index);
+    var store_response = try store_request.send();
+    defer store_response.deinit();
+    const store_payload = try store_response.payload();
+    try testing.expectEqualStrings("stored", try (try store_payload.content()).asText());
+
+    const stored = state.stored orelse return error.MissingStoredCapability;
+    defer {
+        stored.release();
+        state.stored = null;
+    }
+
+    // Before the answer resolves, the capability cannot dispatch locally yet;
+    // it must not fall back to sending a wrongly-addressed wire call.
+    try testing.expectError(error.AnswerNotReady, server.beginCall(stored, EchoInterface.id, 0));
+
+    const resolved = try server.initLocal(.{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer resolved.release();
+    try server.resolvePromise(state.promise.?, resolved);
+
+    // The answer is now resolved, so the previously unresolved handle must
+    // dispatch locally rather than sending a promisedAnswer message.
+    var local_request = try server.beginCall(stored, EchoInterface.id, 0);
+    defer local_request.deinit();
+    var local_params = try local_request.params();
+    try local_params.content().setText("local-answer");
+    var local_response = try local_request.send();
+    defer local_response.deinit();
+    const local_payload = try local_response.payload();
+    try testing.expectEqualStrings("local-answer", try (try local_payload.content()).asText());
+
+    var queued_response = try queued_pending.wait();
+    defer queued_response.deinit();
+}
+
+test "send failure releases its question" {
+    var loopback = transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, loopback.endpoint(.client));
+    defer client.deinit();
+
+    client.peer = server;
+    server.peer = client;
+
+    server.setBootstrap(try server.initLocal(.{
+        .context = null,
+        .interface_id = TestInterface.id,
+        .dispatch = TestInterface.dispatch,
+    }));
+
+    const provider = try client.bootstrap();
+    defer provider.release();
+
+    // Remove the progress source so waitReturn fails instead of blocking.
+    client.peer = null;
+
+    var request = try client.beginCall(provider, TestInterface.id, 0);
+    defer request.deinit();
+    try testing.expectError(error.NoWaitSource, request.send());
+    try testing.expectEqual(@as(usize, 0), client.questions.count());
+}
+
+test "bootstrap wait failure releases its question" {
+    var loopback = transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    const conn = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer conn.deinit();
+
+    var promise = try conn.bootstrapStart();
+    try testing.expectError(error.NoWaitSource, promise.wait());
+    try testing.expectEqual(@as(usize, 0), conn.questions.count());
+}
+
+test "connection deinit frees outstanding question param exports" {
+    var loopback = transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, loopback.endpoint(.client));
+    defer client.deinit();
+
+    client.peer = server;
+    server.peer = client;
+
+    server.setBootstrap(try server.initLocal(.{
+        .context = null,
+        .interface_id = TestInterface.id,
+        .dispatch = TestInterface.dispatch,
+    }));
+
+    const provider = try client.bootstrap();
+    defer provider.release();
+
+    var request = try client.beginCall(provider, TestInterface.id, 0);
+    defer request.deinit();
+    const index = try request.addLocalCapability(.{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    });
+    var params = try request.params();
+    params.content().setCapability(index);
+
+    // Leave the question outstanding so Connection.deinit must clean up the
+    // question's param export bookkeeping itself.
+    _ = try request.start();
 }
 
 test "disembargo loopback echo" {
