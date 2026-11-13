@@ -18,9 +18,9 @@ tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
 capnp compile -I"$include_dir" -o- "$include_dir/rpc.capnp" > "$tmp_dir/rpc.request.bin"
-"$capnpc" --stdout < "$tmp_dir/rpc.request.bin" > src/rpc/rpc.zig
+"$capnpc" --stdout < "$tmp_dir/rpc.request.bin" > src/rpc/generated/rpc.zig
 
 capnp compile -I"$include_dir" -o- "$include_dir/rpc-twoparty.capnp" > "$tmp_dir/rpc-twoparty.request.bin"
-"$capnpc" --stdout < "$tmp_dir/rpc-twoparty.request.bin" > src/rpc/rpc_twoparty.zig
+"$capnpc" --stdout < "$tmp_dir/rpc-twoparty.request.bin" > src/rpc/generated/rpc_twoparty.zig
 
-zig fmt src/rpc/rpc.zig src/rpc/rpc_twoparty.zig
+zig fmt src/rpc/generated/rpc.zig src/rpc/generated/rpc_twoparty.zig

@@ -5,8 +5,10 @@
 //! capabilities, questions, and answers stable for the lifetime of the value.
 
 pub const connection = @import("connection.zig");
+pub const driver = @import("driver.zig");
 
 pub const Connection = connection.Connection;
+pub const Waker = connection.Waker;
 pub const Capability = connection.Capability;
 pub const BootstrapPromise = connection.BootstrapPromise;
 pub const Call = connection.Call;

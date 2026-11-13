@@ -332,17 +332,11 @@ const TypedCalculator = struct {
 };
 
 test "generated typed interface client and server" {
-    var loopback = capnp_rpc.transports.Loopback.init(std.testing.allocator);
-    defer loopback.deinit();
+    const pair = try capnp_rpc.driver.LoopbackPair.init(std.testing.allocator);
+    defer pair.deinit();
 
-    var server_connection = try capnp_rpc.Connection.init(std.testing.allocator, loopback.endpoint(.server));
-    defer server_connection.deinit();
-
-    var client_connection = try capnp_rpc.Connection.init(std.testing.allocator, loopback.endpoint(.client));
-    defer client_connection.deinit();
-
-    client_connection.peer = server_connection;
-    server_connection.peer = client_connection;
+    const server_connection = pair.server;
+    const client_connection = pair.client;
 
     var value_server = interfaces.Calculator.Value.Server{
         .context = &stateless_server_context,

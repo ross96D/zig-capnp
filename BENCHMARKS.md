@@ -43,3 +43,5 @@ Values are medians of three runs.
 | Date | Change | local-call ns/op | scripted-call ns/op | cap-pass ns/op | pipeline ns/op |
 | --- | --- | ---: | ---: | ---: | ---: |
 | 2026-11-12 | P2.0 baseline | 14,468 | 24,044 | 32,145 | 47,361 |
+| 2026-11-12 | P2.1 structure (no behavior change) | 14,299 | 24,070 | 32,022 | 47,340 |
+| 2026-11-12 | P2.2 scheduler decoupling | 14,164 | 24,504 | 31,901 | 48,167 |

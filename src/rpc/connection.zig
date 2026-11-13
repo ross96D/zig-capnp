@@ -29,14 +29,45 @@
 //!
 //! `Connection.deinit` invalidates any handles that are still outstanding;
 //! release all handles before destroying the connection when possible.
+//!
+//! ## Scheduling and reentrancy
+//!
+//! `Connection.step` is the only message pump. `sendRaw` only hands bytes to
+//! the transport; it never pumps a peer. Applications with an existing event
+//! loop should call `step` as readiness arrives, or use `start`/`tryTake` for
+//! non-blocking calls.
+//!
+//! Blocking helpers (`Request.send`, `Connection.bootstrap`) need a progress
+//! source. For transports with a file descriptor they poll it. For in-memory
+//! transports they use an optional `Waker` installed by a driver; see
+//! `driver.LoopbackPair`. A `Waker` is only consulted while a blocking wait is
+//! active.
+//!
+//! `step` may be re-entered from a blocking wait (including from a handler that
+//! makes a blocking call). Incoming `Call` messages received while a dispatch
+//! is active are deferred and drained at the outer step boundary. Other
+//! message types (`Return`, `Finish`, `Resolve`, `Release`, `Disembargo`) are
+//! processed immediately. The runtime is single-threaded; a `Connection` must
+//! not be shared across threads.
 
 const std = @import("std");
 const capnp = @import("capnp");
-pub const rpc = @import("rpc.zig");
+pub const rpc = @import("generated/rpc.zig");
 
 pub const transport = @import("transport.zig");
 pub const Transport = transport.Transport;
 pub const Side = transport.Side;
+
+const internal = @import("internal.zig");
+const wire_builder = @import("wire.zig");
+const PendingCall = internal.PendingCall;
+const LocalKey = internal.LocalKey;
+const LocalKeyContext = internal.LocalKeyContext;
+const ExportKind = internal.ExportKind;
+const FinishState = internal.FinishState;
+const AnswerCallState = internal.AnswerCallState;
+pub const ConnectionLifecycle = internal.ConnectionLifecycle;
+pub const ConnectionDrainState = internal.ConnectionDrainState;
 
 pub const Call = struct {
     connection: *Connection,
@@ -93,26 +124,13 @@ pub const DisembargoCallback = struct {
     function: *const fn (context: *anyopaque, embargo_id: u32) void,
 };
 
-const LocalKey = struct {
-    context: usize,
-    interface_id: u64,
-    dispatch: usize,
-};
-
-const LocalKeyContext = struct {
-    pub fn hash(_: LocalKeyContext, key: LocalKey) u64 {
-        var hasher = std.hash.Wyhash.init(0);
-        hasher.update(std.mem.asBytes(&key.context));
-        hasher.update(std.mem.asBytes(&key.interface_id));
-        hasher.update(std.mem.asBytes(&key.dispatch));
-        return hasher.final();
-    }
-
-    pub fn eql(_: LocalKeyContext, a: LocalKey, b: LocalKey) bool {
-        return a.context == b.context and
-            a.interface_id == b.interface_id and
-            a.dispatch == b.dispatch;
-    }
+/// Optional blocking-wait hook. When the transport has no file descriptor,
+/// `Connection.waitReturn` invokes this to make progress on whatever drives the
+/// connection. The loopback driver uses it to step the peer; real event loops
+/// do not need it.
+pub const Waker = struct {
+    context: *anyopaque,
+    function: *const fn (context: *anyopaque) anyerror!void,
 };
 
 const LocalEntry = struct {
@@ -137,16 +155,6 @@ const ImportEntry = struct {
     resolved: Capability = .none,
 };
 
-const PendingCall = struct {
-    question_id: u32,
-    bytes: []u8,
-};
-
-const ExportKind = enum {
-    hosted,
-    promise,
-};
-
 const ExportEntry = struct {
     connection: *Connection,
     export_id: u32,
@@ -157,11 +165,6 @@ const ExportEntry = struct {
     handle_refs: u32 = 0,
     kind: ExportKind = .hosted,
     pending_calls: std.ArrayList(PendingCall) = .empty,
-};
-
-const FinishState = enum {
-    not_sent,
-    sent,
 };
 
 const QuestionRef = struct {
@@ -193,13 +196,6 @@ const AnswerCapability = struct {
     /// Non-null when this handle belongs to one of our outgoing questions.
     question: ?*QuestionRef,
     refs: u32,
-};
-
-const AnswerCallState = enum {
-    /// A placeholder created so pipelined calls have somewhere to attach.
-    reserved,
-    /// The original Call has been received (dispatching or queued).
-    received,
 };
 
 const AnswerState = struct {
@@ -788,16 +784,11 @@ pub const BootstrapPromise = struct {
     }
 };
 
-pub const ConnectionLifecycle = enum { open, closing, closed };
-pub const ConnectionDrainState = enum { idle, draining };
-
 pub const Connection = struct {
     allocator: std.mem.Allocator,
     transport: Transport,
-    /// Optional in-process peer. When set, sending a message immediately pumps
-    /// the peer so that the blocking `Request.send` path can complete without
-    /// an external event loop.
-    peer: ?*Connection = null,
+    /// Optional blocking-wait hook; see `Waker`.
+    waker: ?Waker = null,
     bootstrap_capability: Capability = .none,
     disembargo_callback: ?DisembargoCallback = null,
     next_question_id: u32 = 1,
@@ -812,6 +803,9 @@ pub const Connection = struct {
     answer_capabilities: std.ArrayList(*AnswerCapability) = .empty,
     dispatch_depth: usize = 0,
     deferred_calls: std.ArrayList(PendingCall) = .empty,
+    /// Index of the first unconsumed deferred call. Consumed entries before
+    /// this index keep their (already freed) byte pointers and are ignored.
+    deferred_head: usize = 0,
     drain_state: ConnectionDrainState = .idle,
     pending_error: ?anyerror = null,
     lifecycle: ConnectionLifecycle = .open,
@@ -847,10 +841,6 @@ pub const Connection = struct {
 
     pub fn deinit(self: *Connection) void {
         const allocator = self.allocator;
-        if (self.peer) |peer| {
-            // Keep the peer from retaining a pointer to freed connection state.
-            if (peer.peer == self) peer.peer = null;
-        }
         self.lifecycle = .closing;
         self.bootstrap_capability.release();
         self.bootstrap_capability = .none;
@@ -918,7 +908,7 @@ pub const Connection = struct {
 
         self.destroyRemainingLocals();
 
-        for (self.deferred_calls.items) |item| self.allocator.free(item.bytes);
+        for (self.deferred_calls.items[self.deferred_head..]) |item| self.allocator.free(item.bytes);
         self.deferred_calls.deinit(self.allocator);
 
         self.lifecycle = .closed;
@@ -1001,16 +991,7 @@ pub const Connection = struct {
         reason: [:0]const u8,
         abort_type: rpc.Exception.Type,
     ) !void {
-        var message = capnp.MessageBuilder{ .allocator = self.allocator };
-        try message.init();
-        defer message.deinit();
-
-        var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
-        var exception = try root.setAbort();
-        try exception.setReason(reason);
-        exception.setType(abort_type);
-
-        const bytes = try message.toBytes(self.allocator);
+        const bytes = try wire_builder.buildAbort(self.allocator, reason, abort_type);
         defer self.allocator.free(bytes);
         try self.sendRaw(bytes);
     }
@@ -1064,6 +1045,10 @@ pub const Connection = struct {
         self.disembargo_callback = callback;
     }
 
+    pub fn setWaker(self: *Connection, waker: ?Waker) void {
+        self.waker = waker;
+    }
+
     /// Process all currently available messages and flush buffered output.
     /// This never waits for the transport.
     pub fn step(self: *Connection) !void {
@@ -1084,8 +1069,8 @@ pub const Connection = struct {
 
     fn waitForProgress(self: *Connection) !void {
         if (self.transport.fd() < 0) {
-            const peer = self.peer orelse return error.NoWaitSource;
-            try peer.step();
+            const waker = self.waker orelse return error.NoWaitSource;
+            try waker.function(waker.context);
             try self.step();
             return;
         }
@@ -1452,7 +1437,6 @@ pub const Connection = struct {
 
     fn sendRaw(self: *Connection, bytes: []const u8) anyerror!void {
         try self.transport.send(bytes);
-        if (self.peer) |peer| try peer.step();
     }
 
     fn waitReturn(self: *Connection, question_id: u32) !Response {
@@ -1479,16 +1463,7 @@ pub const Connection = struct {
     }
 
     fn sendFinish(self: *Connection, question_id: u32, release_result_caps: bool) !void {
-        var message = capnp.MessageBuilder{ .allocator = self.allocator };
-        try message.init();
-        defer message.deinit();
-
-        var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
-        var finish = try root.setFinish();
-        finish.setQuestionId(question_id);
-        finish.setReleaseResultCaps(release_result_caps);
-
-        const bytes = try message.toBytes(self.allocator);
+        const bytes = try wire_builder.buildFinish(self.allocator, question_id, release_result_caps);
         defer self.allocator.free(bytes);
         try self.sendRaw(bytes);
     }
@@ -1848,12 +1823,16 @@ pub const Connection = struct {
         self.drain_state = .draining;
         defer self.drain_state = .idle;
 
-        while (self.deferred_calls.items.len != 0) {
+        while (self.deferred_head < self.deferred_calls.items.len) {
             if (self.dispatch_depth != 0) return;
-            const item = self.deferred_calls.orderedRemove(0);
+            const item = self.deferred_calls.items[self.deferred_head];
+            self.deferred_head += 1;
             defer self.allocator.free(item.bytes);
             try self.handle(item.bytes);
         }
+
+        self.deferred_calls.clearRetainingCapacity();
+        self.deferred_head = 0;
     }
 
     fn ensureAnswer(self: *Connection, question_id: u32) !*AnswerState {
@@ -2001,7 +1980,7 @@ pub const Connection = struct {
     }
 
     fn cancelQueuedCalls(self: *Connection, question_id: u32) void {
-        var deferred_index: usize = 0;
+        var deferred_index: usize = self.deferred_head;
         while (deferred_index < self.deferred_calls.items.len) {
             if (self.deferred_calls.items[deferred_index].question_id == question_id) {
                 const item = self.deferred_calls.orderedRemove(deferred_index);
@@ -2009,6 +1988,10 @@ pub const Connection = struct {
             } else {
                 deferred_index += 1;
             }
+        }
+        if (self.deferred_head == self.deferred_calls.items.len) {
+            self.deferred_calls.clearRetainingCapacity();
+            self.deferred_head = 0;
         }
 
         var export_it = self.exports.valueIterator();
@@ -2109,20 +2092,12 @@ pub const Connection = struct {
     }
 
     fn sendException(self: *Connection, answer_id: u32, err: anyerror, release_param_caps: bool) !void {
-        var message = capnp.MessageBuilder{ .allocator = self.allocator };
-        try message.init();
-        defer message.deinit();
-
-        var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
-        var return_ = try root.setReturn();
-        return_.setAnswerId(answer_id);
-        return_.setReleaseParamCaps(release_param_caps);
-
-        var exception = try return_.setException();
-        try exception.setReason(@errorName(err));
-        exception.setType(.failed);
-
-        const bytes = try message.toBytes(self.allocator);
+        const bytes = try wire_builder.buildException(
+            self.allocator,
+            answer_id,
+            @errorName(err),
+            release_param_caps,
+        );
         defer self.allocator.free(bytes);
         try self.sendRaw(bytes);
     }
@@ -2419,16 +2394,7 @@ pub const Connection = struct {
     }
 
     fn sendRelease(self: *Connection, export_id: u32, reference_count: u32) !void {
-        var message = capnp.MessageBuilder{ .allocator = self.allocator };
-        try message.init();
-        defer message.deinit();
-
-        var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
-        var release = try root.setRelease();
-        release.setId(export_id);
-        release.setReferenceCount(reference_count);
-
-        const bytes = try message.toBytes(self.allocator);
+        const bytes = try wire_builder.buildRelease(self.allocator, export_id, reference_count);
         defer self.allocator.free(bytes);
         try self.sendRaw(bytes);
     }

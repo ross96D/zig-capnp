@@ -32,6 +32,11 @@ pub const Loopback = struct {
         return .{ .context = self, .side = side, .vtable = &vtable };
     }
 
+    /// Number of messages waiting to be received by `side`.
+    pub fn pending(self: *Loopback, side: Side) usize {
+        return self.queues[@backingInt(side)].items.len;
+    }
+
     fn send(t: Transport, bytes: []const u8) anyerror!void {
         const self: *Loopback = @ptrCast(@alignCast(t.context));
         const copy = try self.allocator.dupe(u8, bytes);

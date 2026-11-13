@@ -1,6 +1,6 @@
 # P2 Plan: Structure, Scheduling, and Performance
 
-Status: P2.0 complete; P2.1 next  
+Status: P2.2 complete; P2.3 next
 Started: 2026-11-12
 
 ## Decisions
@@ -56,37 +56,44 @@ Started: 2026-11-12
 - [x] Baseline recorded in `BENCHMARKS.md` using
   `zig build bench -Doptimize=ReleaseFast`.
 
-### P2.1 — Module structure
+### P2.1 — Module structure (complete)
 
-- Split `rpc_tests.zig` into:
+- [x] Split tests:
+  - `src/rpc/rpc_tests.zig` (thin aggregator)
+  - `src/rpc/tests/mod.zig`
+  - `src/rpc/tests/support.zig` (shared test interfaces/helpers)
   - `src/rpc/tests/level0.zig`
   - `src/rpc/tests/capabilities.zig`
   - `src/rpc/tests/pipelining.zig`
   - `src/rpc/tests/lifecycle.zig`
   - `src/rpc/tests/transports.zig`
-  - `src/rpc/tests/mod.zig`
-- Move generated bindings to `src/rpc/generated/` and update
+- [x] Move generated bindings to `src/rpc/generated/` and update
   `codegen_rpc.bash`.
-- Extract stateless message builders into `src/rpc/wire.zig`.
-- Extract pure internal types into `src/rpc/internal.zig` if import
-  constraints allow.
-- Do not force `Request`/`Response`/`Promise`/`Connection` method extraction
-  into separate files if it creates Zig import cycles. Validate with a spike
-  first.
+- [x] Extract stateless message builders into `src/rpc/wire.zig`
+  (`buildFinish`, `buildAbort`, `buildException`, `buildRelease`).
+- [x] Extract pure internal types into `src/rpc/internal.zig`
+  (`PendingCall`, `LocalKey`, `LocalKeyContext`, `ExportKind`,
+  `FinishState`, `AnswerCallState`, lifecycle/drain enums).
+- [x] Do not force `Request`/`Response`/`Promise`/`Connection` method
+  extraction into separate files; they remain in `connection.zig` to avoid
+  import cycles.
 
-### P2.2 — Scheduler decoupling
+### P2.2 — Scheduler decoupling (complete)
 
-- Make `sendRaw` transport-only; remove `peer.step()` from it.
-- Remove `Connection.peer` and migrate tests/examples to an explicit
-  loopback/test driver.
-- Keep blocking `send()` by pumping through `waitForProgress`, or introduce a
-  small blocking driver that owns the peer link.
-- Replace `deferred_calls.orderedRemove(0)` with a head-index/ring buffer.
-- Define and document reentrancy:
-  - `step` may be re-entered from blocking waits
-  - inbound `Call` is deferred while `dispatch_depth != 0`
-  - other message types may be processed reentrantly
-- Add deep-nesting soak tests.
+- [x] `sendRaw` is transport-only; it no longer pumps a peer.
+- [x] Removed `Connection.peer`.
+- [x] Added `Connection.Waker` and `Connection.setWaker` for blocking waits.
+- [x] Added `driver.LoopbackPair`:
+  - owns two in-memory connections
+  - installs wakers that step the opposite side only during blocking waits
+  - provides explicit `step`/`pump` helpers
+- [x] Migrated tests, `codegen_tests.zig`, and in-process examples to
+  `LoopbackPair`.
+- [x] Replaced `deferred_calls.orderedRemove(0)` with a head-index queue.
+- [x] Documented reentrancy and scheduling in the `connection.zig` module doc.
+- [x] Added a deep local-call nesting test (depth 128).
+- [x] Benchmark comparison recorded in `BENCHMARKS.md`; no planned
+  performance change in this milestone.
 
 ### P2.3 — Performance
 

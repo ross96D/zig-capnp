@@ -4,7 +4,7 @@
 //! messages by itself. Bytes sent by an endpoint land in that endpoint's
 //! outbox; tests decide when (and in what order) to move them into the peer's
 //! inbox. This makes ordering, cancellation, and malformed-message tests
-//! deterministic without involving `Connection.peer`.
+//! deterministic without a blocking driver.
 
 const std = @import("std");
 const transport = @import("../transport.zig");
