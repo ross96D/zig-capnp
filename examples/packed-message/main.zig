@@ -14,12 +14,13 @@ pub fn main() !void {
     p.setY(7);
     try p.setName("packed");
 
-    const raw = try builder.toBytes(allocator);
-    defer allocator.free(raw);
+    const size = try builder.serializedSize();
+    const scratch = try allocator.alloc(u8, size);
+    defer allocator.free(scratch);
 
     var packed_writer = std.Io.Writer.Allocating.init(allocator);
     defer packed_writer.deinit();
-    try capnp.packing.pack(&packed_writer.writer, raw);
+    try builder.writePackedTo(&packed_writer.writer, scratch);
     const packed_bytes = try packed_writer.toOwnedSlice();
     defer allocator.free(packed_bytes);
 
@@ -35,7 +36,7 @@ pub fn main() !void {
 
     const reader = try message.getRootStruct(point.Point.Reader, point.Point.reader_trait);
     std.debug.print("Packed message: raw={d} bytes, packed={d} bytes, x={d}\n", .{
-        raw.len,
+        size,
         packed_bytes.len,
         reader.x(),
     });

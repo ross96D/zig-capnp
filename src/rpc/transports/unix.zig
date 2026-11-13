@@ -70,11 +70,11 @@ pub const Stream = struct {
         return .{ .context = self, .side = side, .vtable = &vtable };
     }
 
-    fn send(t: Transport, bytes: []const u8) anyerror!void {
+    fn send(t: Transport, parts: transport.MessageParts) anyerror!void {
         const self: *Stream = @ptrCast(@alignCast(t.context));
         if (self.closed) return error.EndOfStream;
 
-        try self.writer.append(bytes);
+        try self.writer.appendParts(parts);
         try self.flushPending();
     }
 
@@ -268,9 +268,12 @@ const WriteQueue = struct {
         return self.start >= self.buf.items.len;
     }
 
-    fn append(self: *WriteQueue, bytes: []const u8) !void {
+    fn appendParts(self: *WriteQueue, parts: transport.MessageParts) !void {
         self.compactIfNeeded();
-        try self.buf.appendSlice(self.allocator, bytes);
+        try self.buf.appendSlice(self.allocator, parts.header);
+        for (parts.segments) |segment| {
+            try self.buf.appendSlice(self.allocator, segment);
+        }
     }
 
     fn compactIfNeeded(self: *WriteQueue) void {

@@ -19,6 +19,14 @@ const scriptedPump = support.scriptedPump;
 const scriptedBootstrap = support.scriptedBootstrap;
 const messageIsReturnException = support.messageIsReturnException;
 
+fn serializeMessage(message: capnp.MessageBuilder) ![]u8 {
+    const size = try message.serializedSize();
+    const bytes = try testing.allocator.alloc(u8, size);
+    errdefer testing.allocator.free(bytes);
+    _ = try message.writeToBuffer(bytes);
+    return bytes;
+}
+
 test "send failure releases its question" {
     const pair = try driver.LoopbackPair.init(testing.allocator);
     defer pair.deinit();
@@ -73,11 +81,11 @@ test "unsupported messages abort the connection" {
     var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
     _ = try root.setUnimplemented();
 
-    const bytes = try message.toBytes(testing.allocator);
+    const bytes = try serializeMessage(message);
     defer testing.allocator.free(bytes);
     // The loopback transport always sends to the opposite side, so send from
     // the server to deliver the message to the client.
-    try server.transport.send(bytes);
+    try server.transport.send(.{ .header = bytes });
 
     try testing.expectError(error.UnsupportedMessage, client.step());
     try testing.expect(client.isClosed());
@@ -342,7 +350,7 @@ test "scripted transport: duplicate questions and unknown exports are rejected" 
     call.setInterfaceId(TestInterface.id);
     call.setMethodId(0);
 
-    const unknown_bytes = try message.toBytes(testing.allocator);
+    const unknown_bytes = try serializeMessage(message);
     try link.pushInbox(.server, unknown_bytes);
     try server.step();
 

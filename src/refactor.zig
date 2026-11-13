@@ -1572,8 +1572,10 @@ pub fn Refactor(comptime W: type) type {
             defer builder.deinit();
             try builder.initFromAnyPointer(source);
 
-            const bytes = try builder.toBytes(ctx.allocator);
+            const size = try builder.serializedSize();
+            const bytes = try ctx.allocator.alloc(u8, size);
             defer ctx.allocator.free(bytes);
+            _ = try builder.writeToBuffer(bytes);
 
             const segment_count: usize = 1 + std.mem.readInt(u32, bytes[0..4], .little);
             const data_start = std.mem.alignForward(usize, 4 + 4 * segment_count, 8);

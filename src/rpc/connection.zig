@@ -58,6 +58,14 @@ pub const transport = @import("transport.zig");
 pub const Transport = transport.Transport;
 pub const Side = transport.Side;
 
+/// RPC control messages are usually small. Avoid `MessageBuilder`'s 64 KiB
+/// default reservation for every request/response.
+const message_initial_segment_bytes: u32 = 1024;
+
+/// `MessageBuilder` stores at most 16 segments. Header size for 16 segments is
+/// 4 * (16 + 1) = 68 bytes, aligned up to 72.
+const message_header_buffer_bytes: usize = 72;
+
 const internal = @import("internal.zig");
 const wire_builder = @import("wire.zig");
 const PendingCall = internal.PendingCall;
@@ -196,6 +204,8 @@ const AnswerCapability = struct {
     /// Non-null when this handle belongs to one of our outgoing questions.
     question: ?*QuestionRef,
     refs: u32,
+    /// Position in `Connection.answer_capabilities`, maintained on swapRemove.
+    list_index: usize,
 };
 
 const AnswerState = struct {
@@ -294,6 +304,21 @@ pub const Response = struct {
 
     pub fn fromBytes(bytes: []const u8, connection: *Connection) !Response {
         const message = try capnp.Message.fromBytes(bytes, connection.allocator);
+        return .{
+            .message = message,
+            .connection = connection,
+            .allocator = connection.allocator,
+            .state = .{ .wire = .{} },
+        };
+    }
+
+    /// Build a Response from a buffer whose ownership is transferred to the
+    /// response. Avoids copying the message segments.
+    pub fn fromOwnedBytes(bytes: []u8, connection: *Connection) !Response {
+        const message = capnp.Message.fromOwnedBytes(bytes, connection.allocator) catch |err| {
+            connection.allocator.free(bytes);
+            return err;
+        };
         return .{
             .message = message,
             .connection = connection,
@@ -531,10 +556,7 @@ pub const Request = struct {
 
         try self.encodeCaps(pending);
 
-        const bytes = try pending.message.toBytes(allocator);
-        defer allocator.free(bytes);
-
-        try self.connection.sendRaw(bytes);
+        try self.connection.sendMessage(pending.message);
 
         pending.message.deinit();
         allocator.destroy(pending.message);
@@ -550,13 +572,12 @@ pub const Request = struct {
 
         // Local calls never go over the wire, so the params' capability
         // pointers should reference the request's handles directly rather than
-        // being exported and then decoded as imports of ourselves.
+        // being exported and then decoded as imports of ourselves. The builder
+        // itself is a readable message; use it directly instead of serializing
+        // and reparsing the request.
 
-        const request_bytes = try pending.message.toBytes(allocator);
-        defer allocator.free(request_bytes);
-
-        var request_message = try capnp.Message.fromBytes(request_bytes, allocator);
-        defer request_message.deinit(allocator);
+        // Borrowed view over the builder's segments; do not deinit it.
+        var request_message = pending.message.toReader();
 
         const root = try request_message.getRootStruct(rpc.Message.Reader, rpc.Message.reader_trait);
         const call = (try root.call()) orelse return error.InvalidMessage;
@@ -576,9 +597,8 @@ pub const Request = struct {
             pending.caps.items,
         );
         const bytes = return_bytes.?;
-        defer allocator.free(bytes);
 
-        var response = try Response.fromBytes(bytes, self.connection);
+        var response = try Response.fromOwnedBytes(bytes, self.connection);
         const caps = local_caps.toOwnedSlice(allocator) catch |err| {
             response.deinit();
             return err;
@@ -993,7 +1013,7 @@ pub const Connection = struct {
     ) !void {
         const bytes = try wire_builder.buildAbort(self.allocator, reason, abort_type);
         defer self.allocator.free(bytes);
-        try self.sendRaw(bytes);
+        try self.sendRaw(.{ .header = bytes });
     }
 
     /// Create an owned handle for a local capability. Descriptors with the same
@@ -1091,7 +1111,7 @@ pub const Connection = struct {
         const question = try self.newQuestion();
         errdefer self.destroyQuestion(question);
 
-        var message = capnp.MessageBuilder{ .allocator = self.allocator };
+        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
         try message.init();
         defer message.deinit();
 
@@ -1099,10 +1119,7 @@ pub const Connection = struct {
         var bootstrap_message = try root.setBootstrap();
         bootstrap_message.setQuestionId(question.id);
 
-        const bytes = try message.toBytes(self.allocator);
-        defer self.allocator.free(bytes);
-
-        try self.sendRaw(bytes);
+        try self.sendMessage(&message);
         return .{ .connection = self, .state = .{ .question = question } };
     }
 
@@ -1246,7 +1263,7 @@ pub const Connection = struct {
 
         const message = try self.allocator.create(capnp.MessageBuilder);
         errdefer self.allocator.destroy(message);
-        message.* = .{ .allocator = self.allocator };
+        message.* = .{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
         try message.init();
         errdefer message.deinit();
 
@@ -1282,7 +1299,7 @@ pub const Connection = struct {
         const question_id = self.allocQuestionId();
         const message = try self.allocator.create(capnp.MessageBuilder);
         errdefer self.allocator.destroy(message);
-        message.* = .{ .allocator = self.allocator };
+        message.* = .{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
         try message.init();
         errdefer message.deinit();
 
@@ -1339,7 +1356,7 @@ pub const Connection = struct {
 
         const message = try self.allocator.create(capnp.MessageBuilder);
         errdefer self.allocator.destroy(message);
-        message.* = .{ .allocator = self.allocator };
+        message.* = .{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
         try message.init();
         errdefer message.deinit();
 
@@ -1398,6 +1415,7 @@ pub const Connection = struct {
             .pointer_field = pointer_field,
             .question = question.retain(),
             .refs = 1,
+            .list_index = self.answer_capabilities.items.len,
         };
         try self.answer_capabilities.append(self.allocator, entry);
         return .{ .answer_pipeline = entry };
@@ -1416,6 +1434,7 @@ pub const Connection = struct {
             .pointer_field = pointer_field,
             .question = null,
             .refs = 1,
+            .list_index = self.answer_capabilities.items.len,
         };
         try self.answer_capabilities.append(self.allocator, entry);
         return .{ .answer_promise = entry };
@@ -1425,18 +1444,37 @@ pub const Connection = struct {
         std.debug.assert(entry.refs > 0);
         entry.refs -= 1;
         if (entry.refs != 0) return;
-        for (self.answer_capabilities.items, 0..) |item, i| {
-            if (item == entry) {
-                _ = self.answer_capabilities.swapRemove(i);
-                break;
-            }
+        std.debug.assert(self.answer_capabilities.items[entry.list_index] == entry);
+        _ = self.answer_capabilities.swapRemove(entry.list_index);
+        if (entry.list_index < self.answer_capabilities.items.len) {
+            self.answer_capabilities.items[entry.list_index].list_index = entry.list_index;
         }
         if (entry.question) |question| question.release();
         self.allocator.destroy(entry);
     }
 
-    fn sendRaw(self: *Connection, bytes: []const u8) anyerror!void {
-        try self.transport.send(bytes);
+    fn sendRaw(self: *Connection, parts: transport.MessageParts) anyerror!void {
+        try self.transport.send(parts);
+    }
+
+    /// Send a message without flattening it into a single allocation.
+    fn sendMessage(self: *Connection, message: *const capnp.MessageBuilder) !void {
+        var header_buffer: [message_header_buffer_bytes]u8 = undefined;
+        const parts = transport.MessageParts{
+            .header = try message.writeHeader(&header_buffer),
+            .segments = message.segmentSlices(),
+        };
+        try self.sendRaw(parts);
+    }
+
+    /// Allocate an exact-size buffer and serialize into it. Used where the
+    /// bytes must outlive the send (e.g. stored answers and local responses).
+    fn serializeMessage(self: *Connection, message: *const capnp.MessageBuilder) ![]u8 {
+        const size = try message.serializedSize();
+        const bytes = try self.allocator.alloc(u8, size);
+        errdefer self.allocator.free(bytes);
+        _ = try message.writeToBuffer(bytes);
+        return bytes;
     }
 
     fn waitReturn(self: *Connection, question_id: u32) !Response {
@@ -1458,14 +1496,13 @@ pub const Connection = struct {
 
     fn takeReturn(self: *Connection, question_id: u32) !?Response {
         const entry = self.returns.fetchRemove(question_id) orelse return null;
-        defer self.allocator.free(entry.value);
-        return try Response.fromBytes(entry.value, self);
+        return try Response.fromOwnedBytes(entry.value, self);
     }
 
     fn sendFinish(self: *Connection, question_id: u32, release_result_caps: bool) !void {
         const bytes = try wire_builder.buildFinish(self.allocator, question_id, release_result_caps);
         defer self.allocator.free(bytes);
-        try self.sendRaw(bytes);
+        try self.sendRaw(.{ .header = bytes });
     }
 
     fn handle(self: *Connection, bytes: []const u8) anyerror!void {
@@ -1538,7 +1575,7 @@ pub const Connection = struct {
             },
         };
 
-        var message = capnp.MessageBuilder{ .allocator = self.allocator };
+        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
         try message.init();
         defer message.deinit();
 
@@ -1558,10 +1595,9 @@ pub const Connection = struct {
         answer.call_state = .received;
         try answer.export_ids.append(self.allocator, export_id);
 
-        const bytes = try message.toBytes(self.allocator);
-        defer self.allocator.free(bytes);
-        try self.storeAnswer(question_id, bytes);
-        try self.sendRaw(bytes);
+        const bytes = try self.serializeMessage(&message);
+        try self.storeAnswerOwned(question_id, bytes);
+        try self.sendRaw(.{ .header = bytes });
         try self.processPendingAnswer(question_id);
     }
 
@@ -1757,7 +1793,7 @@ pub const Connection = struct {
             result_caps.deinit(self.allocator);
         }
 
-        var message = capnp.MessageBuilder{ .allocator = self.allocator };
+        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
         try message.init();
         defer message.deinit();
 
@@ -1783,7 +1819,7 @@ pub const Connection = struct {
                 return_.setReleaseParamCaps(local_sink != null);
                 try exception.setReason(@errorName(err));
                 exception.setType(.failed);
-                break :dispatch try message.toBytes(self.allocator);
+                break :dispatch try self.serializeMessage(&message);
             };
 
             if (result_caps.items.len != 0) {
@@ -1804,7 +1840,7 @@ pub const Connection = struct {
                 }
             }
 
-            break :dispatch try message.toBytes(self.allocator);
+            break :dispatch try self.serializeMessage(&message);
         };
 
         if (local_sink) |sink| {
@@ -1812,9 +1848,8 @@ pub const Connection = struct {
             return;
         }
 
-        defer self.allocator.free(bytes);
-        try self.storeAnswer(question_id, bytes);
-        try self.sendRaw(bytes);
+        try self.storeAnswerOwned(question_id, bytes);
+        try self.sendRaw(.{ .header = bytes });
         try self.processPendingAnswer(question_id);
     }
 
@@ -1841,11 +1876,11 @@ pub const Connection = struct {
         return entry.value_ptr;
     }
 
-    fn storeAnswer(self: *Connection, question_id: u32, bytes: []const u8) !void {
+    fn storeAnswerOwned(self: *Connection, question_id: u32, bytes: []u8) !void {
+        errdefer self.allocator.free(bytes);
         const entry = try self.ensureAnswer(question_id);
-        const copy = try self.allocator.dupe(u8, bytes);
         if (entry.resolved_bytes) |old| self.allocator.free(old);
-        entry.resolved_bytes = copy;
+        entry.resolved_bytes = bytes;
     }
 
     fn processPendingAnswer(self: *Connection, question_id: u32) anyerror!void {
@@ -2099,7 +2134,7 @@ pub const Connection = struct {
             release_param_caps,
         );
         defer self.allocator.free(bytes);
-        try self.sendRaw(bytes);
+        try self.sendRaw(.{ .header = bytes });
     }
 
     fn decodeCapTable(self: *Connection, payload: rpc.Payload.Reader) ![]Capability {
@@ -2311,7 +2346,7 @@ pub const Connection = struct {
         };
         if (imported.connection != self) return error.WrongConnection;
 
-        var message = capnp.MessageBuilder{ .allocator = self.allocator };
+        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
         try message.init();
         defer message.deinit();
 
@@ -2322,9 +2357,7 @@ pub const Connection = struct {
         var context = disembargo.context();
         context.setSenderLoopback(embargo_id);
 
-        const bytes = try message.toBytes(self.allocator);
-        defer self.allocator.free(bytes);
-        try self.sendRaw(bytes);
+        try self.sendMessage(&message);
     }
 
     fn handleDisembargo(self: *Connection, disembargo: rpc.Disembargo.Reader) !void {
@@ -2333,7 +2366,7 @@ pub const Connection = struct {
             .senderLoopback => {
                 const embargo_id = context.senderLoopback() orelse return;
 
-                var message = capnp.MessageBuilder{ .allocator = self.allocator };
+                var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
                 try message.init();
                 defer message.deinit();
 
@@ -2363,9 +2396,7 @@ pub const Connection = struct {
                 var echo_context = echo.context();
                 echo_context.setReceiverLoopback(embargo_id);
 
-                const bytes = try message.toBytes(self.allocator);
-                defer self.allocator.free(bytes);
-                try self.sendRaw(bytes);
+                try self.sendMessage(&message);
             },
             .receiverLoopback => {
                 const embargo_id = context.receiverLoopback() orelse return;
@@ -2378,7 +2409,7 @@ pub const Connection = struct {
     }
 
     fn sendResolve(self: *Connection, promise_id: u32, target: Capability) !void {
-        var message = capnp.MessageBuilder{ .allocator = self.allocator };
+        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
         try message.init();
         defer message.deinit();
 
@@ -2388,15 +2419,13 @@ pub const Connection = struct {
         const cap = try resolve.setCap();
         _ = try self.encodeCapability(target, cap);
 
-        const bytes = try message.toBytes(self.allocator);
-        defer self.allocator.free(bytes);
-        try self.sendRaw(bytes);
+        try self.sendMessage(&message);
     }
 
     fn sendRelease(self: *Connection, export_id: u32, reference_count: u32) !void {
         const bytes = try wire_builder.buildRelease(self.allocator, export_id, reference_count);
         defer self.allocator.free(bytes);
-        try self.sendRaw(bytes);
+        try self.sendRaw(.{ .header = bytes });
     }
 
     fn allocQuestionId(self: *Connection) u32 {

@@ -981,7 +981,14 @@ test "packed message round-trip through public API" {
     var root = try builder.initRootStruct(OneWord.Builder, OneWord.builder_trait);
     root.setValue(0x0123_4567_89ab_cdef);
 
-    const bytes = try builder.toPackedBytes(testing.allocator);
+    const size = try builder.serializedSize();
+    const scratch = try testing.allocator.alloc(u8, size);
+    defer testing.allocator.free(scratch);
+
+    var packed_writer = std.Io.Writer.Allocating.init(testing.allocator);
+    defer packed_writer.deinit();
+    try builder.writePackedTo(&packed_writer.writer, scratch);
+    const bytes = try packed_writer.toOwnedSlice();
     defer testing.allocator.free(bytes);
 
     var message = try capnp.Message.fromPackedBytes(bytes, testing.allocator);

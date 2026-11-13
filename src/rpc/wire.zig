@@ -7,12 +7,14 @@ const std = @import("std");
 const capnp = @import("capnp");
 const rpc = @import("generated/rpc.zig");
 
+const message_initial_segment_bytes: u32 = 1024;
+
 pub fn buildFinish(
     allocator: std.mem.Allocator,
     question_id: u32,
     release_result_caps: bool,
 ) ![]u8 {
-    var message = capnp.MessageBuilder{ .allocator = allocator };
+    var message = capnp.MessageBuilder{ .allocator = allocator, .next_segment_bytes = message_initial_segment_bytes };
     try message.init();
     defer message.deinit();
 
@@ -21,7 +23,7 @@ pub fn buildFinish(
     finish.setQuestionId(question_id);
     finish.setReleaseResultCaps(release_result_caps);
 
-    return try message.toBytes(allocator);
+    return try serialize(allocator, message);
 }
 
 pub fn buildAbort(
@@ -29,7 +31,7 @@ pub fn buildAbort(
     reason: [:0]const u8,
     abort_type: rpc.Exception.Type,
 ) ![]u8 {
-    var message = capnp.MessageBuilder{ .allocator = allocator };
+    var message = capnp.MessageBuilder{ .allocator = allocator, .next_segment_bytes = message_initial_segment_bytes };
     try message.init();
     defer message.deinit();
 
@@ -38,7 +40,7 @@ pub fn buildAbort(
     try exception.setReason(reason);
     exception.setType(abort_type);
 
-    return try message.toBytes(allocator);
+    return try serialize(allocator, message);
 }
 
 pub fn buildException(
@@ -47,7 +49,7 @@ pub fn buildException(
     reason: [:0]const u8,
     release_param_caps: bool,
 ) ![]u8 {
-    var message = capnp.MessageBuilder{ .allocator = allocator };
+    var message = capnp.MessageBuilder{ .allocator = allocator, .next_segment_bytes = message_initial_segment_bytes };
     try message.init();
     defer message.deinit();
 
@@ -60,7 +62,7 @@ pub fn buildException(
     try exception.setReason(reason);
     exception.setType(.failed);
 
-    return try message.toBytes(allocator);
+    return try serialize(allocator, message);
 }
 
 pub fn buildRelease(
@@ -68,7 +70,7 @@ pub fn buildRelease(
     export_id: u32,
     reference_count: u32,
 ) ![]u8 {
-    var message = capnp.MessageBuilder{ .allocator = allocator };
+    var message = capnp.MessageBuilder{ .allocator = allocator, .next_segment_bytes = message_initial_segment_bytes };
     try message.init();
     defer message.deinit();
 
@@ -77,5 +79,13 @@ pub fn buildRelease(
     release.setId(export_id);
     release.setReferenceCount(reference_count);
 
-    return try message.toBytes(allocator);
+    return try serialize(allocator, message);
+}
+
+fn serialize(allocator: std.mem.Allocator, message: capnp.MessageBuilder) ![]u8 {
+    const size = try message.serializedSize();
+    const bytes = try allocator.alloc(u8, size);
+    errdefer allocator.free(bytes);
+    _ = try message.writeToBuffer(bytes);
+    return bytes;
 }

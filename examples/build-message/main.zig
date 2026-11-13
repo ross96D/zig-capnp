@@ -14,8 +14,10 @@ pub fn main() !void {
     p.setY(-4);
     try p.setName("corner");
 
-    const bytes = try builder.toBytes(allocator);
+    const size = try builder.serializedSize();
+    const bytes = try allocator.alloc(u8, size);
     defer allocator.free(bytes);
+    _ = try builder.writeToBuffer(bytes);
 
     var message = try capnp.Message.fromBytes(bytes, allocator);
     defer message.deinit(allocator);

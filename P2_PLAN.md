@@ -1,6 +1,6 @@
 # P2 Plan: Structure, Scheduling, and Performance
 
-Status: P2.2 complete; P2.3 next
+Status: P2.3 complete; P2.4 next
 Started: 2026-11-12
 
 ## Decisions
@@ -95,21 +95,45 @@ Started: 2026-11-12
 - [x] Benchmark comparison recorded in `BENCHMARKS.md`; no planned
   performance change in this milestone.
 
-### P2.3 — Performance
+### P2.3 — Performance (complete)
 
-- Add owned-buffer paths to `capnp`:
-  - `Message.fromOwnedBytes` / `fromOwnedSegments`
-  - `Response.fromOwnedBytes`
-- Let `takeReturn` transfer stored bytes without copying.
-- Reuse inbound Return buffers where possible.
-- Investigate a builder-to-reader view to avoid serialize/parse round-trips
-  for local calls; otherwise use an arena for temporary buffers.
-- Add per-message arenas for decode allocations.
-- Consider pools for `QuestionRef`, `ExportEntry`, `ImportEntry`,
-  `AnswerCapability`, `LocalEntry`.
-- Store an index in `AnswerCapability` so release is O(1) instead of a linear
-  scan.
-- Compare benchmark results in `BENCHMARKS.md`; no regressions over ~5%.
+- [x] Reduced RPC `MessageBuilder` initial segment from 64 KiB to 1 KiB.
+  This was the dominant cost for small RPC messages.
+- [x] Added `capnp.Message.fromOwnedBytes`, which parses a contiguous message
+  without copying each segment.
+- [x] Added `Response.fromOwnedBytes`.
+- [x] `takeReturn` transfers ownership of stored Return bytes into the
+  Response instead of copying.
+- [x] Local response bytes are transferred into the `Response`.
+- [x] Removed `MessageBuilder.toBytes` / `toPackedBytes` and the hidden
+  `std.Io.Writer.Allocating` path from the RPC hot path.
+- [x] Added low-level serialization primitives:
+  - `serializedSize`
+  - `writeHeader`
+  - `writeToBuffer`
+  - `segmentSlices`
+  - `writePackedTo(writer, scratch)`
+- [x] Replaced `Transport.send(bytes)` with `Transport.send(MessageParts)`.
+  - Unix appends header + segments directly to its write queue.
+  - Loopback/Scripted flatten parts into their queues.
+- [x] `Request.start` no longer flattens wire messages into a temporary buffer.
+- [x] Local requests use the builder-backed `toReader()` path.
+- [x] `AnswerCapability` release is O(1) via a stored list index.
+- [x] Corrected the earlier `toReader` conclusion: the 2x result was an
+  unpinned `std.heap.smp_allocator` slab/page-fault artifact. Pinned, the
+  builder-backed path is faster.
+- [ ] Inbound Return buffers are still duplicated in `handleReturn`; defer
+  transferring ownership from `step` until a benchmark shows it matters.
+- [ ] Pools/per-message arenas were not needed for P2.3 after the above; defer
+  until a benchmark shows allocation churn is still dominant.
+- [x] Benchmark comparison recorded in `BENCHMARKS.md`:
+
+  | Benchmark | P2.2 | P2.3 initial | P2.3 low-level, pinned |
+  | --- | ---: | ---: | ---: |
+  | `local-call` | 14,164 ns | 558 ns | 452 ns |
+  | `scripted-call` | 24,504 ns | 1,140 ns | 976 ns |
+  | `scripted-cap-pass` | 31,901 ns | 1,573 ns | 1,334 ns |
+  | `scripted-pipeline` | 48,167 ns | 2,744 ns | 2,255 ns |
 
 ### P2.4 — Teardown and robustness
 

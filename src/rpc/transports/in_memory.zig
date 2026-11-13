@@ -37,9 +37,9 @@ pub const Loopback = struct {
         return self.queues[@backingInt(side)].items.len;
     }
 
-    fn send(t: Transport, bytes: []const u8) anyerror!void {
+    fn send(t: Transport, parts: transport.MessageParts) anyerror!void {
         const self: *Loopback = @ptrCast(@alignCast(t.context));
-        const copy = try self.allocator.dupe(u8, bytes);
+        const copy = try parts.toOwnedBytes(self.allocator);
         errdefer self.allocator.free(copy);
 
         const peer: usize = 1 - @backingInt(t.side);

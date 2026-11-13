@@ -105,12 +105,12 @@ pub const Scripted = struct {
         try self.pushInbox(side, copy);
     }
 
-    fn send(t: Transport, bytes: []const u8) anyerror!void {
+    fn send(t: Transport, parts: transport.MessageParts) anyerror!void {
         const self: *Scripted = @ptrCast(@alignCast(t.context));
         const from = sideIndex(t.side);
         if (self.closed[from]) return error.EndOfStream;
 
-        const copy = try self.allocator.dupe(u8, bytes);
+        const copy = try parts.toOwnedBytes(self.allocator);
         errdefer self.allocator.free(copy);
         try self.outbox[from].append(self.allocator, copy);
     }

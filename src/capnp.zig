@@ -91,6 +91,7 @@ pub const Error = error{
     NotInitialized,
     AlreadyInitialized,
     InvalidText,
+    NoSpaceLeft,
 };
 
 pub const BuildError = Allocator.Error || Error;
@@ -1118,6 +1119,10 @@ pub fn CompositeListReader(
 
 pub const Message = struct {
     segments: [][]u8 = undefined,
+    /// Set when the message owns a contiguous serialized buffer and `segments`
+    /// point into it. In that case `deinit` frees the buffer once instead of
+    /// freeing each segment independently.
+    owned_bytes: ?[]u8 = null,
     traversal_counter: Counter = Counter{ .limit = 8 * 1024 * 1024 },
 
     pub fn fromFile(file: std.Io.File, io: std.Io, allocator: std.mem.Allocator) !Message {
@@ -1200,11 +1205,44 @@ pub const Message = struct {
         return Message{ .segments = segments };
     }
 
-    pub fn deinit(self: *Message, allocator: std.mem.Allocator) void {
-        for (self.segments) |segment| {
-            allocator.free(segment);
+    /// Parse a contiguous serialized message and take ownership of `bytes`.
+    ///
+    /// On success the returned message frees `bytes` from `deinit`; on error
+    /// the caller retains ownership of `bytes`.
+    pub fn fromOwnedBytes(bytes: []u8, allocator: std.mem.Allocator) !Message {
+        if (bytes.len < 4) return Error.OutOfBounds;
+
+        const segment_count: usize = 1 + std.mem.readInt(u32, bytes[0..4], .little);
+        const table_bytes = std.math.mul(usize, 4, segment_count) catch return Error.MessageTooLarge;
+        const data_offset = std.mem.alignForward(usize, 4 + table_bytes, 8);
+        if (data_offset > bytes.len) return Error.OutOfBounds;
+
+        const segments = try allocator.alloc([]u8, segment_count);
+        errdefer allocator.free(segments);
+
+        var offset = data_offset;
+        for (0..segment_count) |i| {
+            const words = std.mem.readInt(u32, bytes[4 + i * 4 ..][0..4], .little);
+            const byte_len = std.math.mul(usize, words, 8) catch return Error.MessageTooLarge;
+            if (offset + byte_len > bytes.len) return Error.OutOfBounds;
+
+            segments[i] = bytes[offset..][0..byte_len];
+            offset += byte_len;
         }
-        allocator.free(self.segments);
+
+        return Message{ .segments = segments, .owned_bytes = bytes };
+    }
+
+    pub fn deinit(self: *Message, allocator: std.mem.Allocator) void {
+        if (self.owned_bytes) |bytes| {
+            allocator.free(self.segments);
+            allocator.free(bytes);
+        } else {
+            for (self.segments) |segment| {
+                allocator.free(segment);
+            }
+            allocator.free(self.segments);
+        }
     }
 
     pub fn getRootStruct(self: *Message, comptime T: type, comptime trait: ReaderTrait(T)) Error!T {
@@ -1434,8 +1472,68 @@ pub const MessageBuilder = struct {
         }
     }
 
+    /// Borrow the builder's segments as a readable message. The returned
+    /// message is valid only while this builder is alive and must not be
+    /// deinitialized.
     pub fn toReader(self: MessageBuilder) Message {
         return Message{ .segments = self.segments };
+    }
+
+    /// Exact size of the framed serialized message.
+    pub fn serializedSize(self: MessageBuilder) Error!usize {
+        const segment_count = self.segments.len;
+        const table_bytes = 4 * (segment_count + 1);
+        const header_size = std.mem.alignForward(usize, table_bytes, 8);
+
+        var total: usize = header_size;
+        for (self.segments) |segment| {
+            total = std.math.add(usize, total, segment.len) catch return Error.MessageTooLarge;
+        }
+        return total;
+    }
+
+    /// Borrow the builder's segment bytes. The slices are valid only while
+    /// this builder is alive and must not be written through.
+    pub fn segmentSlices(self: MessageBuilder) []const []const u8 {
+        return self.segments;
+    }
+
+    /// Write the framed message header into `buffer` and return the used
+    /// header slice.
+    pub fn writeHeader(self: MessageBuilder, buffer: []u8) Error![]const u8 {
+        const segment_count = self.segments.len;
+        std.debug.assert(segment_count > 0);
+
+        const table_bytes = 4 * (segment_count + 1);
+        const header_size = std.mem.alignForward(usize, table_bytes, 8);
+        if (buffer.len < header_size) return Error.NoSpaceLeft;
+
+        std.mem.writeInt(u32, buffer[0..4], @intCast(segment_count - 1), .little);
+
+        var offset: usize = 4;
+        for (self.segments) |segment| {
+            std.debug.assert(segment.len % 8 == 0);
+            std.mem.writeInt(u32, buffer[offset..][0..4], @intCast(segment.len / 8), .little);
+            offset += 4;
+        }
+
+        @memset(buffer[offset..header_size], 0);
+        return buffer[0..header_size];
+    }
+
+    /// Serialize into caller-provided storage. Returns the written slice.
+    pub fn writeToBuffer(self: MessageBuilder, buffer: []u8) Error![]u8 {
+        const total = try self.serializedSize();
+        if (buffer.len < total) return Error.NoSpaceLeft;
+
+        const header = try self.writeHeader(buffer);
+        var offset: usize = header.len;
+        for (self.segments) |segment| {
+            @memcpy(buffer[offset..][0..segment.len], segment);
+            offset += segment.len;
+        }
+
+        return buffer[0..offset];
     }
 
     pub fn writeTo(self: MessageBuilder, writer: *std.Io.Writer) std.Io.Writer.Error!void {
@@ -1460,24 +1558,9 @@ pub const MessageBuilder = struct {
         for (self.segments) |segment| try writer.writeAll(segment);
     }
 
-    pub fn toBytes(self: MessageBuilder, allocator: std.mem.Allocator) ![]u8 {
-        var output = std.Io.Writer.Allocating.init(allocator);
-        errdefer output.deinit();
-        try self.writeTo(&output.writer);
-        return output.toOwnedSlice();
-    }
-
-    pub fn writePackedTo(self: MessageBuilder, writer: *std.Io.Writer, allocator: std.mem.Allocator) !void {
-        const bytes = try self.toBytes(allocator);
-        defer allocator.free(bytes);
+    pub fn writePackedTo(self: MessageBuilder, writer: *std.Io.Writer, scratch: []u8) !void {
+        const bytes = try self.writeToBuffer(scratch);
         try packing.pack(writer, bytes);
-    }
-
-    pub fn toPackedBytes(self: MessageBuilder, allocator: std.mem.Allocator) ![]u8 {
-        var output = std.Io.Writer.Allocating.init(allocator);
-        errdefer output.deinit();
-        try self.writePackedTo(&output.writer, allocator);
-        return output.toOwnedSlice();
     }
 
     fn listWordCount(element_size: u3, count: u29) BuildError!u32 {
@@ -1644,6 +1727,35 @@ test "test MessageBuilder" {
         try std.testing.expectEqual(@as(u32, 2048), context.offset_words);
         try std.testing.expectEqual(@as(usize, 8192 * 3), context.segments.*[0].len);
     }
+}
+
+test "Message.fromOwnedBytes takes ownership" {
+    var builder = MessageBuilder{ .allocator = std.testing.allocator };
+    try builder.init();
+    defer builder.deinit();
+
+    _ = try builder.alloc(0, 2);
+    const size = try builder.serializedSize();
+    const bytes = try std.testing.allocator.alloc(u8, size);
+    _ = try builder.writeToBuffer(bytes);
+
+    var message = try Message.fromOwnedBytes(bytes, std.testing.allocator);
+    defer message.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), message.segments.len);
+    try std.testing.expectEqual(builder.segments[0].len, message.segments[0].len);
+}
+
+test "capnp struct sizes" {
+    try std.testing.expectEqual(16, @sizeOf(Ptr));
+    try std.testing.expectEqual(56, @sizeOf(AnyPointerReader));
+    try std.testing.expectEqual(24, @sizeOf(AnyPointerBuilder));
+    try std.testing.expectEqual(48, @sizeOf(StructReader));
+    try std.testing.expectEqual(64, @sizeOf(ListBuilder(i32)));
+    try std.testing.expectEqual(48, @sizeOf(ListReader(i32)));
+    try std.testing.expectEqual(32, @sizeOf(StructBuilder));
+    try std.testing.expectEqual(40, @sizeOf(ReadContext));
+    try std.testing.expectEqual(24, @sizeOf(BuildContext));
 }
 
 test {

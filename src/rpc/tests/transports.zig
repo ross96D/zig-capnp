@@ -88,8 +88,8 @@ test "unix transport frames messages" {
         "12345678" ++
         "ABCDEFGH";
 
-    try client.send(frame1);
-    try client.send(frame2);
+    try client.send(.{ .header = frame1 });
+    try client.send(.{ .header = frame2 });
 
     const got1 = try receiveWithPoll(server, testing.allocator);
     defer testing.allocator.free(got1);
