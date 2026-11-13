@@ -389,6 +389,25 @@ test "unsent promise handle release frees its export" {
     try testing.expectEqual(@as(usize, 0), conn.exports.count());
 }
 
+test "export ids are recycled after release" {
+    var loopback = transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    var conn = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer conn.deinit();
+
+    const first = try conn.newPromise();
+    const first_id = first.promised.export_id;
+    first.release();
+    try testing.expectEqual(@as(usize, 0), conn.exports.count());
+
+    const second = try conn.newPromise();
+    const second_id = second.promised.export_id;
+    defer second.release();
+
+    try testing.expectEqual(first_id, second_id);
+}
+
 test "receiverHosted returns the owner's local capability" {
     const pair = try driver.LoopbackPair.init(testing.allocator);
     defer pair.deinit();

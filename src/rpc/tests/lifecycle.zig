@@ -358,10 +358,53 @@ test "scripted transport: late Return is ignored after cancellation" {
 
     pending.deinit();
     try testing.expectEqual(@as(usize, 0), client.questions.count());
+    // The Return may still be in flight, so the question id stays reserved.
+    try testing.expectEqual(@as(usize, 1), client.questions.tombstoneCount());
 
     _ = try link.deliverNext(.server);
     try client.step();
-    try testing.expectEqual(@as(usize, 0), client.returns.count());
+    try testing.expectEqual(@as(usize, 0), client.pendingReturnCount());
+    try testing.expectEqual(@as(usize, 0), client.questions.tombstoneCount());
+}
+
+test "question ids are recycled after completed calls" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = null,
+        .interface_id = TestInterface.id,
+        .dispatch = TestInterface.dispatch,
+    });
+    defer provider.release();
+
+    const initial_slots = client.questions.items.items.len;
+
+    var i: usize = 0;
+    while (i < 200) : (i += 1) {
+        var request = try client.beginCall(provider, TestInterface.id, 0);
+        defer request.deinit();
+        var params = try request.params();
+        try params.content().setText("ping");
+        var pending = try request.start();
+        defer pending.deinit();
+
+        try scriptedPump(client, server, &link);
+        var response = try pending.wait();
+        response.deinit();
+        try scriptedPump(client, server, &link);
+    }
+
+    try testing.expectEqual(@as(usize, 0), client.questions.count());
+    // Sequential calls reuse the same small set of ids instead of growing the
+    // slot array by one entry per call.
+    try testing.expect(client.questions.items.items.len <= initial_slots);
 }
 
 test "scripted transport: duplicate questions and unknown exports are rejected" {
@@ -794,7 +837,7 @@ test "teardown with outstanding questions, answers, and returns" {
     try pair.pump();
 
     try testing.expectEqual(@as(usize, 3), client.questions.count());
-    try testing.expectEqual(@as(usize, 3), client.returns.count());
+    try testing.expectEqual(@as(usize, 3), client.pendingReturnCount());
     try testing.expectEqual(@as(usize, 3), server.answers.count());
 }
 

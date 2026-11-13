@@ -81,6 +81,7 @@ const message_header_buffer_bytes: usize = 72;
 
 const internal = @import("internal.zig");
 const wire_builder = @import("wire.zig");
+const IdSlots = @import("id_table.zig").IdSlots;
 const PendingCall = internal.PendingCall;
 const LocalKey = internal.LocalKey;
 const LocalKeyContext = internal.LocalKeyContext;
@@ -199,6 +200,19 @@ const QuestionRef = struct {
     refs: u32,
     caps_taken: bool = false,
     finish_state: FinishState = .not_sent,
+    /// Set once the Call/Bootstrap has actually been handed to the transport.
+    sent: bool = false,
+    /// Set when a Return for this question has been received. Safe to recycle
+    /// the ID once the question is destroyed.
+    return_received: bool = false,
+    /// Received Return bytes, if any. Owned by the question until taken by a
+    /// Response or freed during teardown.
+    return_bytes: ?[]u8 = null,
+    /// Non-null when this question was created to forward an incoming Call to
+    /// the peer. The value is the original incoming question id.
+    forwarded_original_id: ?u32 = null,
+    /// Set once the forwarded target's Return has been relayed.
+    forwarded_relayed: bool = false,
     /// Export ids created while encoding this question's params. Used to
     /// apply `Return.releaseParamCaps`.
     param_export_ids: std.ArrayList(u32) = .empty,
@@ -231,6 +245,9 @@ const AnswerState = struct {
     /// Tracks whether the original Call for this question has been received.
     /// Placeholder entries created for pipelining remain `.reserved`.
     call_state: AnswerCallState = .reserved,
+    /// Set while this question is waiting behind an unresolved promise or
+    /// answer. Replaces the old `queued_questions` table.
+    queued: bool = false,
     pending: std.ArrayList(PendingCall) = .empty,
     /// Export ids created while encoding this answer's cap table.
     export_ids: std.ArrayList(u32) = .empty,
@@ -240,14 +257,6 @@ const AnswerState = struct {
     /// Non-null while this answer is being served by forwarding the call to
     /// the peer that hosts the resolved target.
     forwarded_question: ?u32 = null,
-};
-
-const ForwardedCall = struct {
-    /// The incoming question whose answer must receive the forwarded Return.
-    original_question_id: u32,
-    /// Set once the target's Return has been relayed. Kept until the original
-    /// Finish so duplicate Returns are ignored and result caps stay alive.
-    relayed: bool = false,
 };
 
 pub const Capability = union(enum) {
@@ -589,6 +598,7 @@ pub const Request = struct {
 
         try self.encodeCaps(pending);
 
+        question.sent = true;
         try self.connection.sendMessage(pending.message);
 
         pending.message.deinit();
@@ -863,18 +873,24 @@ pub const Connection = struct {
     bootstrap_capability: Capability = .none,
     disembargo_callback: ?DisembargoCallback = null,
     next_question_id: u32 = 1,
+    next_local_question_id: u32 = 1,
     next_export_id: u32 = 1,
     next_embargo_id: u32 = 1,
-    returns: std.AutoHashMap(u32, []u8),
-    exports: std.AutoHashMap(u32, *ExportEntry),
+
+    exports: IdSlots(ExportEntry) = .{},
     imports: std.AutoHashMap(u32, *ImportEntry),
+    answers: std.AutoHashMap(u32, *AnswerState),
+    questions: IdSlots(QuestionRef) = .{},
+
     locals: std.HashMap(LocalKey, *LocalEntry, LocalKeyContext, std.hash_map.default_max_load_percentage),
-    answers: std.AutoHashMap(u32, AnswerState),
-    questions: std.AutoHashMap(u32, *QuestionRef),
-    queued_questions: std.AutoHashMap(u32, void),
-    forwarded_calls: std.AutoHashMap(u32, ForwardedCall),
-    embargoes: std.AutoHashMap(u32, *ImportEntry),
+    embargoes: IdSlots(ImportEntry) = .{},
     answer_capabilities: std.ArrayList(*AnswerCapability) = .empty,
+    question_pool: std.heap.MemoryPool(QuestionRef) = .empty,
+    export_pool: std.heap.MemoryPool(ExportEntry) = .empty,
+    import_pool: std.heap.MemoryPool(ImportEntry) = .empty,
+    local_pool: std.heap.MemoryPool(LocalEntry) = .empty,
+    answer_pool: std.heap.MemoryPool(AnswerState) = .empty,
+    answer_capability_pool: std.heap.MemoryPool(AnswerCapability) = .empty,
     dispatch_depth: usize = 0,
     deferred_calls: std.ArrayList(PendingCall) = .empty,
     /// Index of the first unconsumed deferred call. Consumed entries before
@@ -890,15 +906,9 @@ pub const Connection = struct {
         self.* = .{
             .allocator = allocator,
             .transport = transport_value,
-            .returns = std.AutoHashMap(u32, []u8).init(allocator),
-            .exports = std.AutoHashMap(u32, *ExportEntry).init(allocator),
             .imports = std.AutoHashMap(u32, *ImportEntry).init(allocator),
             .locals = std.HashMap(LocalKey, *LocalEntry, LocalKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .answers = std.AutoHashMap(u32, AnswerState).init(allocator),
-            .questions = std.AutoHashMap(u32, *QuestionRef).init(allocator),
-            .queued_questions = std.AutoHashMap(u32, void).init(allocator),
-            .forwarded_calls = std.AutoHashMap(u32, ForwardedCall).init(allocator),
-            .embargoes = std.AutoHashMap(u32, *ImportEntry).init(allocator),
+            .answers = std.AutoHashMap(u32, *AnswerState).init(allocator),
         };
         return self;
     }
@@ -915,15 +925,22 @@ pub const Connection = struct {
         return self.lifecycle == .closed or self.transport.isClosed();
     }
 
+    /// Number of received Returns that have not yet been taken by a Promise.
+    /// Exposed primarily for tests and diagnostics.
+    pub fn pendingReturnCount(self: *Connection) usize {
+        var count: usize = 0;
+        var iterator = self.questions.valueIterator();
+        while (iterator.next()) |question| {
+            if (question.return_bytes != null) count += 1;
+        }
+        return count;
+    }
+
     pub fn deinit(self: *Connection) void {
         const allocator = self.allocator;
         self.lifecycle = .closing;
         self.bootstrap_capability.release();
         self.bootstrap_capability = .none;
-
-        var return_it = self.returns.valueIterator();
-        while (return_it.next()) |bytes| self.allocator.free(bytes.*);
-        self.returns.deinit();
 
         // Answer-held capabilities may reference imports, exports, or questions,
         // so release them before tearing those tables down.
@@ -932,32 +949,19 @@ pub const Connection = struct {
                 var answer_it = self.answers.keyIterator();
                 break :blk answer_it.next().?.*;
             };
-            var answer = self.answers.fetchRemove(question_id).?.value;
-            for (answer.held_caps.items) |capability| capability.release();
-            answer.held_caps.deinit(self.allocator);
-            if (answer.resolved_bytes) |bytes| self.allocator.free(bytes);
-            for (answer.pending.items) |item| {
-                _ = self.queued_questions.remove(item.question_id);
-                self.allocator.free(item.bytes);
-            }
-            answer.pending.deinit(self.allocator);
-            answer.export_ids.deinit(self.allocator);
+            const answer = self.answers.fetchRemove(question_id).?.value;
+            self.destroyAnswer(answer);
         }
-        self.answers.deinit();
 
+        // Keep the answers map allocated while exports are torn down: queued
+        // call entries may still be referenced from an export's pending list.
         // Remove each entry before destroying it: releasing a capability may
-        // recursively destroy another export or import. Snapshot one key with
-        // a short-lived iterator so the map is never mutated while an iterator
-        // is still live.
+        // recursively destroy another export or import.
         while (self.exports.count() != 0) {
-            const export_id = blk: {
-                var export_it = self.exports.keyIterator();
-                break :blk export_it.next().?.*;
-            };
-            const entry = self.exports.fetchRemove(export_id).?.value;
+            const entry = self.exports.release(self.exports.firstLiveId().?);
             self.destroyExport(entry);
         }
-        self.exports.deinit();
+        self.exports.deinit(self.allocator);
 
         while (self.imports.count() != 0) {
             const import_id = blk: {
@@ -968,6 +972,7 @@ pub const Connection = struct {
             self.destroyImport(entry);
         }
         self.imports.deinit();
+        self.answers.deinit();
 
         while (self.answer_capabilities.items.len != 0) {
             const entry = self.answer_capabilities.pop().?;
@@ -975,28 +980,34 @@ pub const Connection = struct {
                 std.debug.assert(question.refs > 0);
                 question.refs -= 1;
             }
-            self.allocator.destroy(entry);
+            self.answer_capability_pool.destroy(entry);
         }
         self.answer_capabilities.deinit(self.allocator);
 
         while (self.questions.count() != 0) {
-            const question_id = blk: {
-                var question_it = self.questions.keyIterator();
-                break :blk question_it.next().?.*;
-            };
-            const question = self.questions.fetchRemove(question_id).?.value;
+            const question = self.questions.release(self.questions.firstLiveId().?);
+            if (question.return_bytes) |bytes| self.allocator.free(bytes);
             question.param_export_ids.deinit(self.allocator);
-            self.allocator.destroy(question);
+            self.question_pool.destroy(question);
         }
-        self.questions.deinit();
-        self.queued_questions.deinit();
-        self.forwarded_calls.deinit();
-        self.embargoes.deinit();
+        self.questions.deinit(self.allocator);
+
+        while (self.embargoes.count() != 0) {
+            _ = self.embargoes.release(self.embargoes.firstLiveId().?);
+        }
+        self.embargoes.deinit(self.allocator);
 
         self.destroyRemainingLocals();
 
         for (self.deferred_calls.items[self.deferred_head..]) |item| self.allocator.free(item.bytes);
         self.deferred_calls.deinit(self.allocator);
+
+        self.question_pool.deinit(self.allocator);
+        self.export_pool.deinit(self.allocator);
+        self.import_pool.deinit(self.allocator);
+        self.local_pool.deinit(self.allocator);
+        self.answer_pool.deinit(self.allocator);
+        self.answer_capability_pool.deinit(self.allocator);
 
         self.lifecycle = .closed;
         allocator.destroy(self);
@@ -1010,9 +1021,26 @@ pub const Connection = struct {
             };
             const entry = self.locals.fetchRemove(key).?.value;
             if (entry.capability.destroy) |destroy| destroy(dispatchContext(entry.capability.context));
-            self.allocator.destroy(entry);
+            self.local_pool.destroy(entry);
         }
         self.locals.deinit();
+    }
+
+    fn unqueueQuestion(self: *Connection, question_id: u32) void {
+        if (self.answers.get(question_id)) |answer| answer.queued = false;
+    }
+
+    fn destroyAnswer(self: *Connection, answer: *AnswerState) void {
+        if (answer.resolved_bytes) |bytes| self.allocator.free(bytes);
+        for (answer.pending.items) |item| {
+            self.unqueueQuestion(item.question_id);
+            self.allocator.free(item.bytes);
+        }
+        answer.pending.deinit(self.allocator);
+        answer.export_ids.deinit(self.allocator);
+        for (answer.held_caps.items) |capability| capability.release();
+        answer.held_caps.deinit(self.allocator);
+        self.answer_pool.destroy(answer);
     }
 
     fn destroyExport(self: *Connection, entry: *ExportEntry) void {
@@ -1024,27 +1052,46 @@ pub const Connection = struct {
         }
         if (!isNone(entry.capability)) entry.capability.release();
         for (entry.pending_calls.items) |item| {
-            _ = self.queued_questions.remove(item.question_id);
+            self.unqueueQuestion(item.question_id);
             self.allocator.free(item.bytes);
         }
         entry.pending_calls.deinit(self.allocator);
-        self.allocator.destroy(entry);
+        self.export_pool.destroy(entry);
     }
 
     fn destroyImport(self: *Connection, entry: *ImportEntry) void {
         if (!isNone(entry.resolved)) entry.resolved.release();
-        self.allocator.destroy(entry);
+        self.import_pool.destroy(entry);
     }
 
     fn destroyQuestion(self: *Connection, question: *QuestionRef) void {
-        if (self.questions.get(question.id) == question) {
-            _ = self.questions.remove(question.id);
-        }
-        if (self.returns.fetchRemove(question.id)) |removed| {
-            self.allocator.free(removed.value);
+        std.debug.assert(self.questions.getPtr(question.id) == question);
+
+        const needs_tombstone =
+            self.lifecycle == .open and
+            question.sent and
+            !question.return_received;
+
+        if (question.return_bytes) |bytes| {
+            self.allocator.free(bytes);
+            question.return_bytes = null;
         }
         question.param_export_ids.deinit(self.allocator);
-        self.allocator.destroy(question);
+
+        if (needs_tombstone and
+            self.questions.tombstoneCount() >= @as(usize, self.limits.max_live_questions))
+        {
+            // A peer that never answers abandoned calls must not be able to
+            // reserve an unbounded number of IDs. The connection is already
+            // unusable once this limit is reached.
+            self.noteError(error.QuestionLimitExceeded);
+            _ = self.questions.release(question.id);
+        } else if (needs_tombstone) {
+            _ = self.questions.tombstone(question.id);
+        } else {
+            _ = self.questions.release(question.id);
+        }
+        self.question_pool.destroy(question);
     }
 
     fn finishQuestion(self: *Connection, question: *QuestionRef) void {
@@ -1150,8 +1197,8 @@ pub const Connection = struct {
             return .{ .local = entry };
         }
 
-        const entry = try self.allocator.create(LocalEntry);
-        errdefer self.allocator.destroy(entry);
+        const entry = try self.local_pool.create(self.allocator);
+        errdefer self.local_pool.destroy(entry);
         entry.* = .{
             .connection = self,
             .key = key,
@@ -1172,7 +1219,7 @@ pub const Connection = struct {
             _ = self.locals.remove(entry.key);
         }
         if (entry.capability.destroy) |destroy| destroy(dispatchContext(entry.capability.context));
-        self.allocator.destroy(entry);
+        self.local_pool.destroy(entry);
     }
 
     pub fn setBootstrap(self: *Connection, capability: Capability) void {
@@ -1251,6 +1298,7 @@ pub const Connection = struct {
         var bootstrap_message = try root.setBootstrap();
         bootstrap_message.setQuestionId(question.id);
 
+        question.sent = true;
         try self.sendMessage(&message);
         return .{ .connection = self, .state = .{ .question = question } };
     }
@@ -1276,8 +1324,8 @@ pub const Connection = struct {
 
     pub fn newPromise(self: *Connection) !Capability {
         const export_id = try self.allocExportId();
-        const entry = try self.allocator.create(ExportEntry);
-        errdefer self.allocator.destroy(entry);
+        const entry = try self.export_pool.create(self.allocator);
+        errdefer self.export_pool.destroy(entry);
         entry.* = .{
             .connection = self,
             .export_id = export_id,
@@ -1286,7 +1334,7 @@ pub const Connection = struct {
             .handle_refs = 1,
             .kind = .promise,
         };
-        try self.exports.put(export_id, entry);
+        try self.exports.insert(self.allocator, export_id, entry);
         return .{ .promised = entry };
     }
 
@@ -1314,7 +1362,7 @@ pub const Connection = struct {
             // The peer will never forward these calls now. Report the failure
             // for each queued call instead of leaving its caller blocked.
             for (pending.items) |item| {
-                _ = self.queued_questions.remove(item.question_id);
+                self.unqueueQuestion(item.question_id);
                 self.sendException(item.question_id, err, true) catch {};
             }
             self.maybeDestroyExport(entry);
@@ -1322,17 +1370,19 @@ pub const Connection = struct {
         };
 
         for (pending.items) |item| {
-            _ = self.queued_questions.remove(item.question_id);
             // The placeholder answer entry was created when the call was
             // queued. Let the replay claim it again without tripping the
             // duplicate-question check, while preserving any pipelined calls
             // already attached to it.
-            if (self.answers.getPtr(item.question_id)) |answer| answer.call_state = .reserved;
+            if (self.answers.get(item.question_id)) |answer| {
+                answer.queued = false;
+                answer.call_state = .reserved;
+            }
             self.handle(item.bytes) catch |err| {
                 // If replay failed before the answer could be claimed again,
                 // keep treating the question as received so a duplicate Call
                 // cannot overwrite the entry.
-                if (self.answers.getPtr(item.question_id)) |answer| answer.call_state = .received;
+                if (self.answers.get(item.question_id)) |answer| answer.call_state = .received;
                 self.sendException(item.question_id, err, true) catch {};
             };
         }
@@ -1430,7 +1480,7 @@ pub const Connection = struct {
         method_id: u16,
     ) !Request {
         if (entry.connection != self) return error.WrongConnection;
-        const question_id = self.allocQuestionId();
+        const question_id = self.allocLocalId();
         const message = try self.allocator.create(capnp.MessageBuilder);
         errdefer self.allocator.destroy(message);
         message.* = .{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
@@ -1469,7 +1519,7 @@ pub const Connection = struct {
         // `receiverAnswer` descriptor), not to an outstanding question of
         // ours. It must be resolved locally; sending `promisedAnswer` back
         // over the wire would address the wrong table.
-        const answer = self.answers.getPtr(entry.question_id) orelse return error.UnknownAnswer;
+        const answer = self.answers.get(entry.question_id) orelse return error.UnknownAnswer;
         const bytes = answer.resolved_bytes orelse return error.AnswerNotReady;
         const capability = try self.resolveAnswerCapabilityField(bytes, entry.pointer_field);
         defer capability.release();
@@ -1527,15 +1577,15 @@ pub const Connection = struct {
         if (self.questions.count() >= @as(usize, self.limits.max_live_questions)) {
             return error.QuestionLimitExceeded;
         }
-        const id = self.allocQuestionId();
-        const question = try self.allocator.create(QuestionRef);
-        errdefer self.allocator.destroy(question);
+        const id = try self.allocQuestionId();
+        const question = try self.question_pool.create(self.allocator);
+        errdefer self.question_pool.destroy(question);
         question.* = .{
             .connection = self,
             .id = id,
             .refs = 1,
         };
-        try self.questions.put(id, question);
+        try self.questions.insert(self.allocator, id, question);
         return question;
     }
 
@@ -1544,13 +1594,15 @@ pub const Connection = struct {
         question: *QuestionRef,
         pointer_field: ?u16,
     ) !Capability {
-        const entry = try self.allocator.create(AnswerCapability);
-        errdefer self.allocator.destroy(entry);
+        const entry = try self.answer_capability_pool.create(self.allocator);
+        errdefer self.answer_capability_pool.destroy(entry);
+        const retained_question = question.retain();
+        errdefer retained_question.release();
         entry.* = .{
             .connection = self,
             .question_id = question.id,
             .pointer_field = pointer_field,
-            .question = question.retain(),
+            .question = retained_question,
             .refs = 1,
             .list_index = self.answer_capabilities.items.len,
         };
@@ -1563,8 +1615,8 @@ pub const Connection = struct {
         question_id: u32,
         pointer_field: ?u16,
     ) !Capability {
-        const entry = try self.allocator.create(AnswerCapability);
-        errdefer self.allocator.destroy(entry);
+        const entry = try self.answer_capability_pool.create(self.allocator);
+        errdefer self.answer_capability_pool.destroy(entry);
         entry.* = .{
             .connection = self,
             .question_id = question_id,
@@ -1587,7 +1639,7 @@ pub const Connection = struct {
             self.answer_capabilities.items[entry.list_index].list_index = entry.list_index;
         }
         if (entry.question) |question| question.release();
-        self.allocator.destroy(entry);
+        self.answer_capability_pool.destroy(entry);
     }
 
     fn sendRaw(self: *Connection, parts: transport.MessageParts) anyerror!void {
@@ -1636,8 +1688,10 @@ pub const Connection = struct {
     }
 
     fn takeReturn(self: *Connection, question_id: u32) !?Response {
-        const entry = self.returns.fetchRemove(question_id) orelse return null;
-        return try Response.fromOwnedBytes(entry.value, self);
+        const question = self.questions.getPtr(question_id) orelse return null;
+        const bytes = question.return_bytes orelse return null;
+        question.return_bytes = null;
+        return try Response.fromOwnedBytes(bytes, self);
     }
 
     fn sendFinish(self: *Connection, question_id: u32, release_result_caps: bool) !void {
@@ -1699,7 +1753,7 @@ pub const Connection = struct {
 
     fn handleBootstrap(self: *Connection, bootstrap_message: rpc.Bootstrap.Reader) !void {
         const question_id = bootstrap_message.questionId();
-        if (self.answers.contains(question_id) or self.queued_questions.contains(question_id)) {
+        if (self.answers.contains(question_id)) {
             try self.sendException(question_id, error.DuplicateQuestion, true);
             return;
         }
@@ -1744,12 +1798,8 @@ pub const Connection = struct {
 
     fn handleCall(self: *Connection, call: rpc.Call.Reader, bytes: []const u8) !void {
         const question_id = call.questionId();
-        if (self.queued_questions.contains(question_id)) {
-            try self.sendException(question_id, error.DuplicateQuestion, true);
-            return;
-        }
-        if (self.answers.getPtr(question_id)) |answer| {
-            if (answer.call_state == .received) {
+        if (self.answers.get(question_id)) |answer| {
+            if (answer.queued or answer.call_state == .received) {
                 try self.sendException(question_id, error.DuplicateQuestion, true);
                 return;
             }
@@ -1789,7 +1839,7 @@ pub const Connection = struct {
         const question_id = call.questionId();
         const transform = try promised.transform();
 
-        const entry = self.answers.getPtr(answer_id) orelse {
+        const entry = self.answers.get(answer_id) orelse {
             try self.sendException(question_id, error.UnknownAnswer, true);
             return;
         };
@@ -1829,11 +1879,9 @@ pub const Connection = struct {
         });
         errdefer _ = entry.pending_calls.pop();
 
-        try self.queued_questions.put(question_id, {});
-        errdefer _ = self.queued_questions.remove(question_id);
-
         const answer = try self.ensureAnswer(question_id);
-        answer.call_state = .received;
+        answer.call_state = .reserved;
+        answer.queued = true;
     }
 
     /// Queue a pipelined call until the answer it depends on is resolved.
@@ -1855,8 +1903,9 @@ pub const Connection = struct {
         });
         errdefer _ = answer.pending.pop();
 
-        try self.queued_questions.put(question_id, {});
-        errdefer _ = self.queued_questions.remove(question_id);
+        const queued_answer = try self.ensureAnswer(question_id);
+        queued_answer.call_state = .reserved;
+        queued_answer.queued = true;
     }
 
     fn copyPayloadWithCapabilities(
@@ -1931,44 +1980,40 @@ pub const Connection = struct {
             &question.param_export_ids,
         );
 
-        try self.forwarded_calls.put(question.id, .{ .original_question_id = question_id });
-        errdefer _ = self.forwarded_calls.remove(question.id);
+        question.forwarded_original_id = question_id;
+        errdefer question.forwarded_original_id = null;
         answer.forwarded_question = question.id;
         errdefer answer.forwarded_question = null;
 
+        question.sent = true;
         try self.sendMessage(&message);
     }
 
     fn cancelForwardedQuestion(self: *Connection, forwarded_id: u32) void {
-        _ = self.forwarded_calls.remove(forwarded_id);
-        if (self.questions.get(forwarded_id)) |question| {
+        if (self.questions.getPtr(forwarded_id)) |question| {
+            question.forwarded_original_id = null;
             self.finishQuestion(question);
         }
     }
 
-    /// Build a Return for the original caller from the target's Return and
-    /// finish the forwarded question.
+    /// Build a Return for the original caller from the target's Return. The
+    /// forwarded question stays alive until the original Finish so duplicate
+    /// Returns are ignored and result exports stay alive.
     fn handleForwardedReturn(
         self: *Connection,
-        forwarded_id: u32,
-        forwarded: ForwardedCall,
+        question: *QuestionRef,
         return_: rpc.Return.Reader,
     ) !void {
-        const forwarded_question = self.questions.get(forwarded_id);
-
-        if (forwarded_question) |question| {
-            if (return_.releaseParamCaps()) {
-                for (question.param_export_ids.items) |export_id| {
-                    self.releaseExportRef(export_id, 1);
-                }
-                question.param_export_ids.clearRetainingCapacity();
+        if (return_.releaseParamCaps()) {
+            for (question.param_export_ids.items) |export_id| {
+                self.releaseExportRef(export_id, 1);
             }
+            question.param_export_ids.clearRetainingCapacity();
         }
 
-        const original_id = forwarded.original_question_id;
-        const original_answer = self.answers.getPtr(original_id) orelse {
-            _ = self.forwarded_calls.remove(forwarded_id);
-            if (forwarded_question) |question| self.finishQuestion(question);
+        const original_id = question.forwarded_original_id.?;
+        const original_answer = self.answers.get(original_id) orelse {
+            self.finishQuestion(question);
             return;
         };
         // Keep `forwarded_question` set until the original Finish. The target's
@@ -2207,14 +2252,15 @@ pub const Connection = struct {
     }
 
     fn ensureAnswer(self: *Connection, question_id: u32) !*AnswerState {
-        if (!self.answers.contains(question_id) and
-            self.answers.count() >= @as(usize, self.limits.max_live_answers))
-        {
+        if (self.answers.get(question_id)) |answer| return answer;
+        if (self.answers.count() >= @as(usize, self.limits.max_live_answers)) {
             return error.AnswerLimitExceeded;
         }
-        const entry = try self.answers.getOrPut(question_id);
-        if (!entry.found_existing) entry.value_ptr.* = .{};
-        return entry.value_ptr;
+        const answer = try self.answer_pool.create(self.allocator);
+        errdefer self.answer_pool.destroy(answer);
+        answer.* = .{};
+        try self.answers.put(question_id, answer);
+        return answer;
     }
 
     fn storeAnswerOwned(self: *Connection, question_id: u32, bytes: []u8) !void {
@@ -2225,7 +2271,7 @@ pub const Connection = struct {
     }
 
     fn processPendingAnswer(self: *Connection, question_id: u32) anyerror!void {
-        const entry = self.answers.getPtr(question_id) orelse return;
+        const entry = self.answers.get(question_id) orelse return;
         if (entry.pending.items.len == 0) return;
 
         var pending = entry.pending;
@@ -2237,14 +2283,14 @@ pub const Connection = struct {
         var handled: usize = 0;
         defer {
             for (pending.items[handled..]) |item| {
-                _ = self.queued_questions.remove(item.question_id);
+                self.unqueueQuestion(item.question_id);
                 self.allocator.free(item.bytes);
             }
         }
 
         while (handled < pending.items.len) {
             const item = pending.items[handled];
-            _ = self.queued_questions.remove(item.question_id);
+            self.unqueueQuestion(item.question_id);
             try self.handle(item.bytes);
             self.allocator.free(item.bytes);
             handled += 1;
@@ -2373,8 +2419,7 @@ pub const Connection = struct {
         }
 
         var export_it = self.exports.valueIterator();
-        while (export_it.next()) |entry_ptr| {
-            const entry = entry_ptr.*;
+        while (export_it.next()) |entry| {
             var index: usize = 0;
             while (index < entry.pending_calls.items.len) {
                 if (entry.pending_calls.items[index].question_id == question_id) {
@@ -2387,7 +2432,8 @@ pub const Connection = struct {
         }
 
         var answer_it = self.answers.valueIterator();
-        while (answer_it.next()) |answer| {
+        while (answer_it.next()) |answer_ptr| {
+            const answer = answer_ptr.*;
             var index: usize = 0;
             while (index < answer.pending.items.len) {
                 if (answer.pending.items[index].question_id == question_id) {
@@ -2402,30 +2448,21 @@ pub const Connection = struct {
 
     fn handleFinish(self: *Connection, finish: rpc.Finish.Reader) !void {
         const question_id = finish.questionId();
-        if (self.answers.getPtr(question_id)) |answer| {
+        if (self.answers.get(question_id)) |answer| {
             if (answer.forwarded_question) |forwarded_id| {
                 answer.forwarded_question = null;
                 self.cancelForwardedQuestion(forwarded_id);
             }
         }
         if (self.answers.fetchRemove(question_id)) |removed| {
-            var answer = removed.value;
+            const answer = removed.value;
             if (finish.releaseResultCaps()) {
                 for (answer.export_ids.items) |export_id| {
                     self.releaseExportRef(export_id, 1);
                 }
             }
-            if (answer.resolved_bytes) |bytes| self.allocator.free(bytes);
-            for (answer.pending.items) |item| {
-                _ = self.queued_questions.remove(item.question_id);
-                self.allocator.free(item.bytes);
-            }
-            answer.pending.deinit(self.allocator);
-            answer.export_ids.deinit(self.allocator);
-            for (answer.held_caps.items) |capability| capability.release();
-            answer.held_caps.deinit(self.allocator);
+            self.destroyAnswer(answer);
         }
-        _ = self.queued_questions.remove(question_id);
         self.cancelQueuedCalls(question_id);
     }
 
@@ -2488,21 +2525,35 @@ pub const Connection = struct {
 
     fn clearEmbargo(self: *Connection, entry: *ImportEntry) void {
         if (entry.embargo_id) |embargo_id| {
-            _ = self.embargoes.remove(embargo_id);
             entry.embargo_id = null;
+            if (self.embargoes.getPtr(embargo_id) == entry) {
+                if (self.lifecycle == .open and
+                    self.embargoes.tombstoneCount() < @as(usize, self.limits.max_live_imports))
+                {
+                    _ = self.embargoes.tombstone(embargo_id);
+                } else {
+                    if (self.lifecycle == .open) self.noteError(error.ImportLimitExceeded);
+                    _ = self.embargoes.release(embargo_id);
+                }
+            }
         }
     }
 
     fn startEmbargo(self: *Connection, entry: *ImportEntry) !void {
         self.clearEmbargo(entry);
 
-        const embargo_id = self.allocEmbargoId();
-        try self.embargoes.put(embargo_id, entry);
-        errdefer _ = self.embargoes.remove(embargo_id);
+        const embargo_id = try self.allocEmbargoId();
+        self.embargoes.insert(self.allocator, embargo_id, entry) catch |err| {
+            _ = self.embargoes.release(embargo_id);
+            return err;
+        };
         entry.embargo_id = embargo_id;
-        errdefer entry.embargo_id = null;
 
-        try self.sendEmbargo(entry, embargo_id);
+        self.sendEmbargo(entry, embargo_id) catch |err| {
+            entry.embargo_id = null;
+            _ = self.embargoes.release(embargo_id);
+            return err;
+        };
     }
 
     fn sendEmbargo(self: *Connection, entry: *ImportEntry, embargo_id: u32) !void {
@@ -2544,16 +2595,24 @@ pub const Connection = struct {
 
     fn handleReturn(self: *Connection, return_: rpc.Return.Reader, bytes: []const u8) !void {
         const answer_id = return_.answerId();
-        if (self.forwarded_calls.getPtr(answer_id)) |forwarded| {
-            if (forwarded.relayed) return;
-            forwarded.relayed = true;
-            try self.handleForwardedReturn(answer_id, forwarded.*, return_);
+        const question = self.questions.getPtr(answer_id) orelse {
+            // A Return for an abandoned question confirms that the ID can now
+            // be recycled. Anything else is a late duplicate; ignore it.
+            if (self.questions.isTombstone(answer_id)) {
+                self.questions.clearTombstone(answer_id);
+            }
+            return;
+        };
+
+        question.return_received = true;
+
+        if (question.forwarded_original_id) |_| {
+            if (question.forwarded_relayed) return;
+            question.forwarded_relayed = true;
+            try self.handleForwardedReturn(question, return_);
             return;
         }
 
-        // A Return for a question we no longer track is a late reply to a
-        // canceled/abandoned call. Ignore it instead of growing the table.
-        const question = self.questions.get(answer_id) orelse return;
         if (return_.releaseParamCaps()) {
             for (question.param_export_ids.items) |export_id| {
                 self.releaseExportRef(export_id, 1);
@@ -2564,9 +2623,8 @@ pub const Connection = struct {
         const copy = try self.allocator.dupe(u8, bytes);
         errdefer self.allocator.free(copy);
 
-        if (try self.returns.fetchPut(answer_id, copy)) |old| {
-            self.allocator.free(old.value);
-        }
+        if (question.return_bytes) |old| self.allocator.free(old);
+        question.return_bytes = copy;
     }
 
     fn sendException(self: *Connection, answer_id: u32, err: anyerror, release_param_caps: bool) !void {
@@ -2621,7 +2679,7 @@ pub const Connection = struct {
             const question_id = answer.questionId();
             const transform = try answer.transform();
 
-            if (self.answers.getPtr(question_id)) |state| {
+            if (self.answers.get(question_id)) |state| {
                 if (state.resolved_bytes) |bytes| {
                     return try self.resolveAnswerCapability(bytes, transform);
                 }
@@ -2649,8 +2707,8 @@ pub const Connection = struct {
             return error.ImportLimitExceeded;
         }
 
-        const entry = try self.allocator.create(ImportEntry);
-        errdefer self.allocator.destroy(entry);
+        const entry = try self.import_pool.create(self.allocator);
+        errdefer self.import_pool.destroy(entry);
         entry.* = .{
             .connection = self,
             .export_id = export_id,
@@ -2670,10 +2728,7 @@ pub const Connection = struct {
             _ = self.imports.remove(entry.export_id);
         }
 
-        if (entry.embargo_id) |embargo_id| {
-            _ = self.embargoes.remove(embargo_id);
-            entry.embargo_id = null;
-        }
+        self.clearEmbargo(entry);
 
         if (!isNone(entry.resolved)) {
             entry.resolved.release();
@@ -2683,7 +2738,7 @@ pub const Connection = struct {
         if (entry.wire_refs > 0 and self.lifecycle == .open) {
             self.sendRelease(entry.export_id, entry.wire_refs) catch |err| self.noteError(err);
         }
-        self.allocator.destroy(entry);
+        self.import_pool.destroy(entry);
     }
 
     /// Encode a capability into a `CapDescriptor`. Returns the export id used,
@@ -2764,15 +2819,17 @@ pub const Connection = struct {
 
     fn allocExport(self: *Connection, capability: Capability) !*ExportEntry {
         const export_id = try self.allocExportId();
-        const entry = try self.allocator.create(ExportEntry);
-        errdefer self.allocator.destroy(entry);
+        const entry = try self.export_pool.create(self.allocator);
+        errdefer self.export_pool.destroy(entry);
+        const retained_capability = capability.retain();
+        errdefer retained_capability.release();
         entry.* = .{
             .connection = self,
             .export_id = export_id,
-            .capability = capability.retain(),
+            .capability = retained_capability,
             .wire_refs = 0,
         };
-        try self.exports.put(export_id, entry);
+        try self.exports.insert(self.allocator, export_id, entry);
         return entry;
     }
 
@@ -2780,7 +2837,7 @@ pub const Connection = struct {
         if (entry.wire_refs != 0 or entry.handle_refs != 0) return;
 
         if (self.exports.get(entry.export_id) == entry) {
-            _ = self.exports.remove(entry.export_id);
+            _ = self.exports.release(entry.export_id);
         }
         switch (entry.capability) {
             .local => |local| {
@@ -2858,8 +2915,11 @@ pub const Connection = struct {
             },
             .receiverLoopback => {
                 const embargo_id = context.receiverLoopback() orelse return;
-                if (self.embargoes.fetchRemove(embargo_id)) |removed| {
-                    removed.value.embargo_id = null;
+                if (self.embargoes.getPtr(embargo_id)) |entry| {
+                    entry.embargo_id = null;
+                    _ = self.embargoes.release(embargo_id);
+                } else if (self.embargoes.isTombstone(embargo_id)) {
+                    self.embargoes.clearTombstone(embargo_id);
                 }
                 if (self.disembargo_callback) |callback| {
                     callback.function(callback.context, embargo_id);
@@ -2889,33 +2949,27 @@ pub const Connection = struct {
         try self.sendRaw(.{ .header = bytes });
     }
 
-    fn allocQuestionId(self: *Connection) u32 {
-        while (true) {
-            const id = self.next_question_id;
-            self.next_question_id +%= 1;
-            if (self.next_question_id == 0) self.next_question_id = 1;
-            if (!self.questions.contains(id) and !self.returns.contains(id)) return id;
-        }
+    fn allocQuestionId(self: *Connection) !u32 {
+        return self.questions.allocId(self.allocator, &self.next_question_id);
+    }
+
+    /// Local calls never touch the wire, so their synthetic question ids are
+    /// independent of the wire question id space.
+    fn allocLocalId(self: *Connection) u32 {
+        const id = self.next_local_question_id;
+        self.next_local_question_id +%= 1;
+        if (self.next_local_question_id == 0) self.next_local_question_id = 1;
+        return id;
     }
 
     fn allocExportId(self: *Connection) !u32 {
         if (self.exports.count() >= @as(usize, self.limits.max_live_exports)) {
             return error.ExportLimitExceeded;
         }
-        while (true) {
-            const id = self.next_export_id;
-            self.next_export_id +%= 1;
-            if (self.next_export_id == 0) self.next_export_id = 1;
-            if (!self.exports.contains(id)) return id;
-        }
+        return self.exports.allocId(self.allocator, &self.next_export_id);
     }
 
-    fn allocEmbargoId(self: *Connection) u32 {
-        while (true) {
-            const id = self.next_embargo_id;
-            self.next_embargo_id +%= 1;
-            if (self.next_embargo_id == 0) self.next_embargo_id = 1;
-            if (!self.embargoes.contains(id)) return id;
-        }
+    fn allocEmbargoId(self: *Connection) !u32 {
+        return self.embargoes.allocId(self.allocator, &self.next_embargo_id);
     }
 };
