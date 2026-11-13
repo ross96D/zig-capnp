@@ -41,6 +41,58 @@ fn buildResolve(promise_id: u32, target_id: u32) ![]u8 {
     return serializeMessage(message);
 }
 
+const RecordingState = struct {
+    bytes: [8]u8 = undefined,
+    len: usize = 0,
+};
+
+const RecordingInterface = struct {
+    pub const id: u64 = 0x6c1d9e4a2f8b3075;
+
+    fn dispatch(context: *anyopaque, method_id: u16, call: connection.Call) anyerror!void {
+        switch (method_id) {
+            0 => {
+                const state: *RecordingState = @ptrCast(@alignCast(context));
+                const text = try call.params.asText();
+                if (state.len < state.bytes.len) {
+                    state.bytes[state.len] = text[0];
+                    state.len += 1;
+                }
+                try call.results.setText(text);
+            },
+            1 => {
+                if (call.capabilities.len != 1) return error.MissingCapability;
+                try call.results.setText("cap");
+            },
+            else => return error.MethodNotFound,
+        }
+    }
+};
+
+/// Create a promise export on the server, obtain its import on the client, and
+/// drain the bootstrap/finish traffic so callers can control later delivery.
+fn obtainPromiseImport(
+    client: *connection.Connection,
+    server: *connection.Connection,
+    link: *transports.Scripted,
+    provider: connection.Capability,
+) !connection.Capability {
+    var request = try client.beginCall(provider, ProviderInterface.id, 2);
+    defer request.deinit();
+
+    var pending = try request.start();
+    defer pending.deinit();
+    try scriptedPump(client, server, link);
+
+    var response = try pending.wait();
+    const promise = try response.capability(0);
+    errdefer promise.release();
+
+    response.deinit();
+    try scriptedPump(client, server, link);
+    return promise;
+}
+
 test "send failure releases its question" {
     const pair = try driver.LoopbackPair.init(testing.allocator);
     defer pair.deinit();
@@ -744,4 +796,299 @@ test "teardown with outstanding questions, answers, and returns" {
     try testing.expectEqual(@as(usize, 3), client.questions.count());
     try testing.expectEqual(@as(usize, 3), client.returns.count());
     try testing.expectEqual(@as(usize, 3), server.answers.count());
+}
+
+test "queued call is forwarded to a promise resolved to an imported capability" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer provider.release();
+
+    const promise = try obtainPromiseImport(client, server, &link, provider);
+    defer promise.release();
+
+    // Queue a call behind the unresolved promise.
+    var queued_request = try client.beginCall(promise, EchoInterface.id, 0);
+    defer queued_request.deinit();
+    var queued_params = try queued_request.params();
+    try queued_params.content().setText("queued");
+    var queued_pending = try queued_request.start();
+    defer queued_pending.deinit();
+
+    try testing.expect(try link.deliverNext(.client));
+    try server.step();
+    try testing.expectEqual(@as(usize, 0), link.outboxLen(.server));
+
+    // Resolve the promise to a capability hosted by the client. The server sees
+    // this as an imported capability, so replaying the queued call would need
+    // forwarding.
+    const echo = try client.initLocal(.{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    });
+    defer echo.release();
+
+    var resolve_request = try client.beginCall(provider, ProviderInterface.id, 7);
+    defer resolve_request.deinit();
+    _ = try resolve_request.addCapability(echo);
+    var resolve_pending = try resolve_request.start();
+    defer resolve_pending.deinit();
+
+    try scriptedPump(client, server, &link);
+
+    var queued_response = try queued_pending.wait();
+    defer queued_response.deinit();
+
+    // The current failure is the explicit forwarding rejection, not some other
+    // protocol error.
+    if (try queued_response.exception()) |exception| {
+        try testing.expectEqualStrings("ForwardingUnsupported", try exception.reason());
+    }
+
+    // Desired: the replayed call is forwarded to the client-local capability
+    // and returns normally. Current code returns ForwardingUnsupported.
+    try testing.expectEqual(rpc.Return.Tag.results, try queued_response.which());
+    const payload = try queued_response.payload();
+    try testing.expectEqualStrings("queued", try (try payload.content()).asText());
+}
+
+test "forwarded call preserves params capabilities" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer provider.release();
+
+    const promise = try obtainPromiseImport(client, server, &link, provider);
+    defer promise.release();
+
+    var record = RecordingState{};
+    const recording = try client.initLocal(.{
+        .context = &record,
+        .interface_id = RecordingInterface.id,
+        .dispatch = RecordingInterface.dispatch,
+    });
+    defer recording.release();
+
+    const echo = try client.initLocal(.{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    });
+    defer echo.release();
+
+    var queued_request = try client.beginCall(promise, RecordingInterface.id, 1);
+    defer queued_request.deinit();
+    _ = try queued_request.addCapability(echo);
+    var queued_pending = try queued_request.start();
+    defer queued_pending.deinit();
+
+    try testing.expect(try link.deliverNext(.client));
+    try server.step();
+
+    var resolve_request = try client.beginCall(provider, ProviderInterface.id, 7);
+    defer resolve_request.deinit();
+    _ = try resolve_request.addCapability(recording);
+    var resolve_pending = try resolve_request.start();
+    defer resolve_pending.deinit();
+
+    try scriptedPump(client, server, &link);
+
+    var queued_response = try queued_pending.wait();
+    defer queued_response.deinit();
+
+    try testing.expectEqual(rpc.Return.Tag.results, try queued_response.which());
+    const payload = try queued_response.payload();
+    try testing.expectEqualStrings("cap", try (try payload.content()).asText());
+}
+
+test "forwarded call relays result capabilities" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer provider.release();
+
+    const promise = try obtainPromiseImport(client, server, &link, provider);
+    defer promise.release();
+
+    var target_state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    const target = try client.initLocal(.{
+        .context = &target_state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer target.release();
+
+    var queued_request = try client.beginCall(promise, ProviderInterface.id, 0);
+    defer queued_request.deinit();
+    var queued_pending = try queued_request.start();
+    defer queued_pending.deinit();
+
+    try testing.expect(try link.deliverNext(.client));
+    try server.step();
+
+    var resolve_request = try client.beginCall(provider, ProviderInterface.id, 7);
+    defer resolve_request.deinit();
+    _ = try resolve_request.addCapability(target);
+    var resolve_pending = try resolve_request.start();
+    defer resolve_pending.deinit();
+
+    try scriptedPump(client, server, &link);
+
+    var queued_response = try queued_pending.wait();
+    defer queued_response.deinit();
+
+    try testing.expectEqual(rpc.Return.Tag.results, try queued_response.which());
+    const result_cap = try queued_response.capability(0);
+    defer result_cap.release();
+    switch (result_cap) {
+        .local => {},
+        else => return error.ExpectedLocalResultCapability,
+    }
+}
+
+test "Resolve to a local target is embargoed until prior calls are delivered" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer provider.release();
+
+    const promise = try obtainPromiseImport(client, server, &link, provider);
+    defer promise.release();
+
+    var record = RecordingState{};
+    const recording = try client.initLocal(.{
+        .context = &record,
+        .interface_id = RecordingInterface.id,
+        .dispatch = RecordingInterface.dispatch,
+    });
+    defer recording.release();
+
+    // A is sent and reaches the server before the promise resolves. It queues
+    // behind the unresolved promise.
+    var a_request = try client.beginCall(promise, RecordingInterface.id, 0);
+    defer a_request.deinit();
+    var a_params = try a_request.params();
+    try a_params.content().setText("A");
+    var a_pending = try a_request.start();
+    defer a_pending.deinit();
+
+    try testing.expect(try link.deliverNext(.client));
+    try server.step();
+
+    // Resolve the promise to the client-local recording capability.
+    var resolve_request = try client.beginCall(provider, ProviderInterface.id, 7);
+    defer resolve_request.deinit();
+    _ = try resolve_request.addCapability(recording);
+    var resolve_pending = try resolve_request.start();
+    defer resolve_pending.deinit();
+
+    try testing.expect(try link.deliverNext(.client));
+    try server.step();
+
+    // Deliver only the Resolve first. The client must now be embargoed and
+    // still route calls through the promise.
+    try testing.expect(try link.deliverNext(.server));
+    try client.step();
+
+    switch (promise.imported.resolved) {
+        .local => {},
+        else => return error.ExpectedLocalResolution,
+    }
+    try testing.expect(promise.imported.embargo_id != null);
+
+    // B is issued while the embargo is active; it must not bypass A.
+    var b_request = try client.beginCall(promise, RecordingInterface.id, 0);
+    defer b_request.deinit();
+    var b_params = try b_request.params();
+    try b_params.content().setText("B");
+    var b_pending = try b_request.start();
+    defer b_pending.deinit();
+
+    // Flush the Disembargo and B, then complete the forwarded calls and their
+    // relayed Returns.
+    _ = try link.deliverAll(.client);
+    try server.step();
+    try scriptedPump(client, server, &link);
+
+    var a_response = try a_pending.wait();
+    defer a_response.deinit();
+    try testing.expectEqual(rpc.Return.Tag.results, try a_response.which());
+
+    var b_response = try b_pending.wait();
+    defer b_response.deinit();
+    try testing.expectEqual(rpc.Return.Tag.results, try b_response.which());
+
+    // E-order: A executes before B.
+    try testing.expectEqual(@as(usize, 2), record.len);
+    try testing.expectEqualStrings("AB", record.bytes[0..record.len]);
+    try testing.expect(promise.imported.embargo_id == null);
 }

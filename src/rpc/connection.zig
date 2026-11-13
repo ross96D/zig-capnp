@@ -50,6 +50,12 @@
 //! processed immediately. The runtime is single-threaded; a `Connection` must
 //! not be shared across threads.
 //!
+//! When a promise resolves to a capability hosted by the peer, calls already
+//! queued on the promise are forwarded back to the peer and their Returns are
+//! relayed to the original caller. When it resolves to a locally hosted
+//! capability, the import is embargoed with a loopback `Disembargo` so calls
+//! issued after the resolution cannot overtake calls already in flight.
+//!
 //! ## Errors and limits
 //!
 //! Malformed or unsupported peer messages, and exceeded `Limits`, are reported
@@ -171,6 +177,8 @@ const ImportEntry = struct {
     /// Set when a Resolve message names this promise. Kept alive until the
     /// import itself is released.
     resolved: Capability = .none,
+    /// Non-null while a loopback Disembargo for this import is in flight.
+    embargo_id: ?u32 = null,
 };
 
 const ExportEntry = struct {
@@ -229,6 +237,17 @@ const AnswerState = struct {
     /// Capabilities from the params, kept alive until Finish so that result
     /// descriptors such as receiverHosted can still resolve.
     held_caps: std.ArrayList(Capability) = .empty,
+    /// Non-null while this answer is being served by forwarding the call to
+    /// the peer that hosts the resolved target.
+    forwarded_question: ?u32 = null,
+};
+
+const ForwardedCall = struct {
+    /// The incoming question whose answer must receive the forwarded Return.
+    original_question_id: u32,
+    /// Set once the target's Return has been relayed. Kept until the original
+    /// Finish so duplicate Returns are ignored and result caps stay alive.
+    relayed: bool = false,
 };
 
 pub const Capability = union(enum) {
@@ -845,6 +864,7 @@ pub const Connection = struct {
     disembargo_callback: ?DisembargoCallback = null,
     next_question_id: u32 = 1,
     next_export_id: u32 = 1,
+    next_embargo_id: u32 = 1,
     returns: std.AutoHashMap(u32, []u8),
     exports: std.AutoHashMap(u32, *ExportEntry),
     imports: std.AutoHashMap(u32, *ImportEntry),
@@ -852,6 +872,8 @@ pub const Connection = struct {
     answers: std.AutoHashMap(u32, AnswerState),
     questions: std.AutoHashMap(u32, *QuestionRef),
     queued_questions: std.AutoHashMap(u32, void),
+    forwarded_calls: std.AutoHashMap(u32, ForwardedCall),
+    embargoes: std.AutoHashMap(u32, *ImportEntry),
     answer_capabilities: std.ArrayList(*AnswerCapability) = .empty,
     dispatch_depth: usize = 0,
     deferred_calls: std.ArrayList(PendingCall) = .empty,
@@ -875,6 +897,8 @@ pub const Connection = struct {
             .answers = std.AutoHashMap(u32, AnswerState).init(allocator),
             .questions = std.AutoHashMap(u32, *QuestionRef).init(allocator),
             .queued_questions = std.AutoHashMap(u32, void).init(allocator),
+            .forwarded_calls = std.AutoHashMap(u32, ForwardedCall).init(allocator),
+            .embargoes = std.AutoHashMap(u32, *ImportEntry).init(allocator),
         };
         return self;
     }
@@ -966,6 +990,8 @@ pub const Connection = struct {
         }
         self.questions.deinit();
         self.queued_questions.deinit();
+        self.forwarded_calls.deinit();
+        self.embargoes.deinit();
 
         self.destroyRemainingLocals();
 
@@ -1053,6 +1079,7 @@ pub const Connection = struct {
             error.InvalidAnswer,
             error.InvalidCapability,
             error.InvalidPointer,
+            error.UnsupportedReturn,
             error.DuplicateQuestion,
             error.CyclicResolve,
             error.MessageTooLarge,
@@ -1355,12 +1382,14 @@ pub const Connection = struct {
         if (self.imports.get(entry.export_id) != entry) return error.UnknownCapability;
 
         // If the peer resolved this promise to a capability we host locally,
-        // route the call directly. Sending it to the promise id would make the
-        // peer forward it back (or reject it), and there is no wire ordering
-        // to preserve for a locally-hosted target.
-        switch (entry.resolved) {
-            .local => |resolved| return self.beginLocalCall(resolved, interface_id, method_id),
-            else => {},
+        // route the call directly once the embargo has been lifted. While the
+        // embargo is pending, older calls may still be in flight, so keep
+        // addressing the promise id.
+        if (entry.embargo_id == null) {
+            switch (entry.resolved) {
+                .local => |resolved| return self.beginLocalCall(resolved, interface_id, method_id),
+                else => {},
+            }
         }
 
         const question = try self.newQuestion();
@@ -1830,6 +1859,171 @@ pub const Connection = struct {
         errdefer _ = self.queued_questions.remove(question_id);
     }
 
+    fn copyPayloadWithCapabilities(
+        self: *Connection,
+        source: rpc.Payload.Reader,
+        dest: rpc.Payload.Builder,
+        caps: []const Capability,
+        export_sink: ?*std.ArrayList(u32),
+    ) !void {
+        const dest_content = dest.content();
+        try dest_content.setFromReaderWithCaps(try source.content());
+
+        if (caps.len == 0) return;
+
+        var dest_table = try dest.capTable();
+        try dest_table.init(@intCast(caps.len));
+        for (caps, 0..) |capability, i| {
+            const export_id = try self.encodeCapability(capability, dest_table.get(@intCast(i)));
+            if (export_id) |id| {
+                if (export_sink) |sink| try sink.append(self.allocator, id);
+            }
+        }
+    }
+
+    /// Forward a call whose target resolved to a capability hosted by the
+    /// peer, then relay the eventual Return back to the original caller.
+    fn forwardCall(
+        self: *Connection,
+        imported: *ImportEntry,
+        call: rpc.Call.Reader,
+        question_id: u32,
+    ) !void {
+        if (imported.connection != self) {
+            try self.sendException(question_id, error.ForeignCapability, true);
+            return;
+        }
+
+        const params = try call.params();
+        const decoded_caps = try self.decodeCapTable(params);
+        defer {
+            for (decoded_caps) |capability| capability.release();
+            self.allocator.free(decoded_caps);
+        }
+
+        const answer = try self.ensureAnswer(question_id);
+        answer.call_state = .received;
+        for (decoded_caps) |capability| {
+            try answer.held_caps.append(self.allocator, capability.retain());
+        }
+
+        const question = try self.newQuestion();
+        errdefer self.destroyQuestion(question);
+
+        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
+        try message.init();
+        defer message.deinit();
+
+        var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
+        var forwarded_call = try root.setCall();
+        forwarded_call.setQuestionId(question.id);
+        forwarded_call.setInterfaceId(call.interfaceId());
+        forwarded_call.setMethodId(call.methodId());
+
+        var target = try forwarded_call.target();
+        target.setImportedCap(imported.export_id);
+
+        const forwarded_params = try forwarded_call.params();
+        try self.copyPayloadWithCapabilities(
+            params,
+            forwarded_params,
+            decoded_caps,
+            &question.param_export_ids,
+        );
+
+        try self.forwarded_calls.put(question.id, .{ .original_question_id = question_id });
+        errdefer _ = self.forwarded_calls.remove(question.id);
+        answer.forwarded_question = question.id;
+        errdefer answer.forwarded_question = null;
+
+        try self.sendMessage(&message);
+    }
+
+    fn cancelForwardedQuestion(self: *Connection, forwarded_id: u32) void {
+        _ = self.forwarded_calls.remove(forwarded_id);
+        if (self.questions.get(forwarded_id)) |question| {
+            self.finishQuestion(question);
+        }
+    }
+
+    /// Build a Return for the original caller from the target's Return and
+    /// finish the forwarded question.
+    fn handleForwardedReturn(
+        self: *Connection,
+        forwarded_id: u32,
+        forwarded: ForwardedCall,
+        return_: rpc.Return.Reader,
+    ) !void {
+        const forwarded_question = self.questions.get(forwarded_id);
+
+        if (forwarded_question) |question| {
+            if (return_.releaseParamCaps()) {
+                for (question.param_export_ids.items) |export_id| {
+                    self.releaseExportRef(export_id, 1);
+                }
+                question.param_export_ids.clearRetainingCapacity();
+            }
+        }
+
+        const original_id = forwarded.original_question_id;
+        const original_answer = self.answers.getPtr(original_id) orelse {
+            _ = self.forwarded_calls.remove(forwarded_id);
+            if (forwarded_question) |question| self.finishQuestion(question);
+            return;
+        };
+        // Keep `forwarded_question` set until the original Finish. The target's
+        // result exports must stay alive while the original caller can still
+        // take result capabilities from this relayed Return.
+
+        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
+        try message.init();
+        defer message.deinit();
+
+        var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
+        var relayed = try root.setReturn();
+        relayed.setAnswerId(original_id);
+        // The original caller's params are still held by the original answer
+        // and are released when the original Finish arrives.
+        relayed.setReleaseParamCaps(false);
+
+        switch (return_.which()) {
+            .results => {
+                const source_payload = (try return_.results()) orelse return error.InvalidReturn;
+                const caps = try self.decodeCapTable(source_payload);
+                // Transfer ownership to the original answer. Holding these
+                // handles keeps the target's exports alive until the original
+                // caller has had a chance to take the relayed result caps.
+                for (caps) |capability| {
+                    try original_answer.held_caps.append(self.allocator, capability);
+                }
+                errdefer self.allocator.free(caps);
+
+                const dest_payload = try relayed.setResults();
+                try self.copyPayloadWithCapabilities(
+                    source_payload,
+                    dest_payload,
+                    caps,
+                    &original_answer.export_ids,
+                );
+                self.allocator.free(caps);
+            },
+            .exception => {
+                const source_exception = (try return_.exception()) orelse return error.InvalidReturn;
+                var dest_exception = try relayed.setException();
+                try dest_exception.setReason(try source_exception.reason());
+                dest_exception.setType(source_exception.type());
+                try dest_exception.setTrace(try source_exception.trace());
+            },
+            .canceled => relayed.setCanceled(),
+            else => return error.UnsupportedReturn,
+        }
+
+        const bytes = try self.serializeMessage(&message);
+        try self.storeAnswerOwned(original_id, bytes);
+        try self.sendRaw(.{ .header = bytes });
+        try self.processPendingAnswer(original_id);
+    }
+
     /// Deliver an incoming Call to a resolved target capability. Used both for
     /// direct `importedCap` targets and for targets resolved from pipelined
     /// answers. `.promised` handles are queued or unwrapped as needed.
@@ -1853,7 +2047,7 @@ pub const Connection = struct {
                 }
                 try self.deliverCall(call, entry.capability, question_id, bytes);
             },
-            .imported => try self.sendException(question_id, error.ForwardingUnsupported, true),
+            .imported => |imported| try self.forwardCall(imported, call, question_id),
             .answer_pipeline, .answer_promise => try self.sendException(question_id, error.UnsupportedPromisedTarget, true),
             .none => try self.sendException(question_id, error.UnknownCapability, true),
         }
@@ -2208,6 +2402,12 @@ pub const Connection = struct {
 
     fn handleFinish(self: *Connection, finish: rpc.Finish.Reader) !void {
         const question_id = finish.questionId();
+        if (self.answers.getPtr(question_id)) |answer| {
+            if (answer.forwarded_question) |forwarded_id| {
+                answer.forwarded_question = null;
+                self.cancelForwardedQuestion(forwarded_id);
+            }
+        }
         if (self.answers.fetchRemove(question_id)) |removed| {
             var answer = removed.value;
             if (finish.releaseResultCaps()) {
@@ -2257,21 +2457,67 @@ pub const Connection = struct {
             }
 
             const target = try self.decodeCapability(descriptor_value);
-            errdefer target.release();
 
-            if (self.wouldCreateResolveCycle(entry, target)) return error.CyclicResolve;
+            if (self.wouldCreateResolveCycle(entry, target)) {
+                target.release();
+                return error.CyclicResolve;
+            }
 
             if (!isNone(entry.resolved)) {
                 entry.resolved.release();
                 entry.resolved = .none;
             }
             entry.resolved = target;
+
+            // If the target is local, calls could otherwise bypass the promise
+            // and overtake calls already in flight. Keep using the promise id
+            // until a loopback Disembargo confirms that older calls have been
+            // delivered.
+            switch (target) {
+                .local => try self.startEmbargo(entry),
+                else => self.clearEmbargo(entry),
+            }
         } else {
+            self.clearEmbargo(entry);
             if (!isNone(entry.resolved)) {
                 entry.resolved.release();
                 entry.resolved = .none;
             }
         }
+    }
+
+    fn clearEmbargo(self: *Connection, entry: *ImportEntry) void {
+        if (entry.embargo_id) |embargo_id| {
+            _ = self.embargoes.remove(embargo_id);
+            entry.embargo_id = null;
+        }
+    }
+
+    fn startEmbargo(self: *Connection, entry: *ImportEntry) !void {
+        self.clearEmbargo(entry);
+
+        const embargo_id = self.allocEmbargoId();
+        try self.embargoes.put(embargo_id, entry);
+        errdefer _ = self.embargoes.remove(embargo_id);
+        entry.embargo_id = embargo_id;
+        errdefer entry.embargo_id = null;
+
+        try self.sendEmbargo(entry, embargo_id);
+    }
+
+    fn sendEmbargo(self: *Connection, entry: *ImportEntry, embargo_id: u32) !void {
+        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
+        try message.init();
+        defer message.deinit();
+
+        var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
+        var disembargo = try root.setDisembargo();
+        var target = try disembargo.target();
+        target.setImportedCap(entry.export_id);
+        var context = disembargo.context();
+        context.setSenderLoopback(embargo_id);
+
+        try self.sendMessage(&message);
     }
 
     fn wouldCreateResolveCycle(
@@ -2298,6 +2544,13 @@ pub const Connection = struct {
 
     fn handleReturn(self: *Connection, return_: rpc.Return.Reader, bytes: []const u8) !void {
         const answer_id = return_.answerId();
+        if (self.forwarded_calls.getPtr(answer_id)) |forwarded| {
+            if (forwarded.relayed) return;
+            forwarded.relayed = true;
+            try self.handleForwardedReturn(answer_id, forwarded.*, return_);
+            return;
+        }
+
         // A Return for a question we no longer track is a late reply to a
         // canceled/abandoned call. Ignore it instead of growing the table.
         const question = self.questions.get(answer_id) orelse return;
@@ -2415,6 +2668,11 @@ pub const Connection = struct {
 
         if (self.imports.get(entry.export_id) == entry) {
             _ = self.imports.remove(entry.export_id);
+        }
+
+        if (entry.embargo_id) |embargo_id| {
+            _ = self.embargoes.remove(embargo_id);
+            entry.embargo_id = null;
         }
 
         if (!isNone(entry.resolved)) {
@@ -2600,6 +2858,9 @@ pub const Connection = struct {
             },
             .receiverLoopback => {
                 const embargo_id = context.receiverLoopback() orelse return;
+                if (self.embargoes.fetchRemove(embargo_id)) |removed| {
+                    removed.value.embargo_id = null;
+                }
                 if (self.disembargo_callback) |callback| {
                     callback.function(callback.context, embargo_id);
                 }
@@ -2646,6 +2907,15 @@ pub const Connection = struct {
             self.next_export_id +%= 1;
             if (self.next_export_id == 0) self.next_export_id = 1;
             if (!self.exports.contains(id)) return id;
+        }
+    }
+
+    fn allocEmbargoId(self: *Connection) u32 {
+        while (true) {
+            const id = self.next_embargo_id;
+            self.next_embargo_id +%= 1;
+            if (self.next_embargo_id == 0) self.next_embargo_id = 1;
+            if (!self.embargoes.contains(id)) return id;
         }
     }
 };

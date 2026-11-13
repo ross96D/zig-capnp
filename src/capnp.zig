@@ -430,6 +430,13 @@ pub const AnyPointerBuilder = struct {
         try context.builder.copyPointerTo(&context, source);
     }
 
+    /// Copy a pointer graph while preserving capability pointer indices.
+    /// The caller must also copy/translate the source capability table.
+    pub fn setFromReaderWithCaps(self: AnyPointerBuilder, source: AnyPointerReader) BuildError!void {
+        var context = self.context;
+        try context.builder.copyPointerToWithCaps(&context, source);
+    }
+
     pub fn setCapability(self: AnyPointerBuilder, index: u32) void {
         var context = self.context;
         const raw: u64 = 3 | (@as(u64, index) << 32);
@@ -1581,6 +1588,7 @@ pub const MessageBuilder = struct {
         dest: BuildContext,
         data_words: u16,
         ptr_words: u16,
+        allow_caps: bool,
     ) BuildError!void {
         for (0..data_words) |i| {
             dest.writeInt(u64, @intCast(i), source.readInt(u64, @intCast(i)));
@@ -1591,11 +1599,11 @@ pub const MessageBuilder = struct {
             const ptr = try src.readPtr();
             var dst = dest;
             dst.offset_words += data_words + @as(u29, @intCast(i));
-            try self.copyPointerTo(&dst, .{ .context = src, .ptr = ptr });
+            try self.copyPointerToInternal(&dst, .{ .context = src, .ptr = ptr }, allow_caps);
         }
     }
 
-    fn copyListTo(self: *MessageBuilder, dest: *BuildContext, source: ReadContext, list: Ptr.List) BuildError!void {
+    fn copyListTo(self: *MessageBuilder, dest: *BuildContext, source: ReadContext, list: Ptr.List, allow_caps: bool) BuildError!void {
         if (list.element_size == 7) {
             const tag_raw = source.readInt(u64, 0);
             const tag = Ptr.of_u64(tag_raw);
@@ -1620,7 +1628,7 @@ pub const MessageBuilder = struct {
                 src.offset_words += 1 + @as(u29, @intCast(i)) * @as(u29, @intCast(stride));
                 var dst = object.content;
                 dst.offset_words += 1 + @as(u29, @intCast(i)) * @as(u29, @intCast(stride));
-                try self.copyStructBody(src, dst, struct_tag.data_words, struct_tag.ptr_words);
+                try self.copyStructBody(src, dst, struct_tag.data_words, struct_tag.ptr_words, allow_caps);
             }
             return;
         }
@@ -1640,7 +1648,7 @@ pub const MessageBuilder = struct {
                 const ptr = try src.readPtr();
                 var dst = object.content;
                 dst.offset_words += @intCast(i);
-                try self.copyPointerTo(&dst, .{ .context = src, .ptr = ptr });
+                try self.copyPointerToInternal(&dst, .{ .context = src, .ptr = ptr }, allow_caps);
             }
         } else {
             for (0..words) |i| {
@@ -1649,10 +1657,18 @@ pub const MessageBuilder = struct {
         }
     }
 
-    pub fn copyPointerTo(self: *MessageBuilder, dest: *BuildContext, source: AnyPointerReader) BuildError!void {
+    fn copyPointerToInternal(
+        self: *MessageBuilder,
+        dest: *BuildContext,
+        source: AnyPointerReader,
+        allow_caps: bool,
+    ) BuildError!void {
         switch (source.ptr) {
             .null => dest.writePtr(.null),
-            .capability => return Error.TypeMismatch,
+            .capability => {
+                if (!allow_caps) return Error.TypeMismatch;
+                dest.writePtr(source.ptr);
+            },
             .struct_ => |struct_| {
                 const words = @as(u32, struct_.data_words) + struct_.ptr_words;
                 if (words == 0) {
@@ -1665,11 +1681,21 @@ pub const MessageBuilder = struct {
                     .data_words = struct_.data_words,
                     .ptr_words = struct_.ptr_words,
                 } });
-                try self.copyStructBody(source.context, object.content, struct_.data_words, struct_.ptr_words);
+                try self.copyStructBody(source.context, object.content, struct_.data_words, struct_.ptr_words, allow_caps);
             },
-            .list => |list| try self.copyListTo(dest, source.context, list),
+            .list => |list| try self.copyListTo(dest, source.context, list, allow_caps),
             .inter_segment => return Error.InvalidPointer,
         }
+    }
+
+    pub fn copyPointerTo(self: *MessageBuilder, dest: *BuildContext, source: AnyPointerReader) BuildError!void {
+        return self.copyPointerToInternal(dest, source, false);
+    }
+
+    /// Copy a pointer graph, preserving capability pointer indices. The caller
+    /// is responsible for supplying a corresponding capability table.
+    pub fn copyPointerToWithCaps(self: *MessageBuilder, dest: *BuildContext, source: AnyPointerReader) BuildError!void {
+        return self.copyPointerToInternal(dest, source, true);
     }
 
     pub fn initFromAnyPointer(self: *MessageBuilder, source: AnyPointerReader) BuildError!void {
