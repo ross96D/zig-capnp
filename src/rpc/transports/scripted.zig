@@ -86,6 +86,13 @@ pub const Scripted = struct {
         return count;
     }
 
+    /// Borrow the raw message at `index` in `side`'s outbox without removing it.
+    pub fn peekOutbox(self: *Scripted, side: Side, index: usize) ?[]const u8 {
+        const items = self.outbox[sideIndex(side)].items;
+        if (index >= items.len) return null;
+        return items[index];
+    }
+
     /// Take ownership of the next raw message sent by `side`.
     pub fn takeOutbox(self: *Scripted, side: Side) !?[]u8 {
         const queue = &self.outbox[sideIndex(side)];

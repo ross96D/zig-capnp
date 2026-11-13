@@ -148,6 +148,26 @@ pub fn messageIsReturnException(bytes: []const u8) !bool {
     return return_.which() == .exception;
 }
 
+pub fn messageIsCall(bytes: []const u8) !bool {
+    var message = try capnp.Message.fromBytes(bytes, testing.allocator);
+    defer message.deinit(testing.allocator);
+
+    const root = try message.getRootStruct(rpc.Message.Reader, rpc.Message.reader_trait);
+    return root.which() == .call;
+}
+
+/// Read the imported capability id from a Call's target. Fails when the message
+/// is not a Call or the target is a promisedAnswer.
+pub fn callTargetImportedCap(bytes: []const u8) !u32 {
+    var message = try capnp.Message.fromBytes(bytes, testing.allocator);
+    defer message.deinit(testing.allocator);
+
+    const root = try message.getRootStruct(rpc.Message.Reader, rpc.Message.reader_trait);
+    const call = (try root.call()) orelse return error.NotCall;
+    const target = try call.target();
+    return target.importedCap() orelse return error.NotImportedCap;
+}
+
 pub fn scriptedBootstrap(
     server: *connection.Connection,
     client: *connection.Connection,
