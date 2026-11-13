@@ -49,6 +49,13 @@
 //! message types (`Return`, `Finish`, `Resolve`, `Release`, `Disembargo`) are
 //! processed immediately. The runtime is single-threaded; a `Connection` must
 //! not be shared across threads.
+//!
+//! ## Errors and limits
+//!
+//! Malformed or unsupported peer messages, and exceeded `Limits`, are reported
+//! to the peer with an `Abort` and close the connection. Allocation and
+//! transport failures close it without an Abort. Errors raised by a local
+//! handler are returned as `Return.exception` and leave the connection open.
 
 const std = @import("std");
 const capnp = @import("capnp");
@@ -90,6 +97,9 @@ pub const Call = struct {
     /// The argument is borrowed; the runtime retains its own reference for the
     /// duration of the call.
     pub fn addResultCapability(self: Call, capability: Capability) !u32 {
+        if (self.result_capabilities.items.len >= @as(usize, self.connection.limits.max_cap_table_entries)) {
+            return error.CapTableLimitExceeded;
+        }
         const index: u32 = @intCast(self.result_capabilities.items.len);
         try self.result_capabilities.append(self.connection.allocator, capability.retain());
         return index;
@@ -426,6 +436,7 @@ pub const Response = struct {
             .wire => |*wire| {
                 const result_payload = try self.payload();
                 const cap_table = try result_payload.capTable();
+                try self.connection.checkCapTableLength(cap_table.length);
                 if (index >= cap_table.length) return error.InvalidCapability;
                 if (wire.taken_caps) |flags| {
                     if (index < flags.len and flags[index]) return error.CapabilityAlreadyTaken;
@@ -501,6 +512,9 @@ pub const Request = struct {
     /// The argument is borrowed; the request retains it until `deinit`.
     pub fn addCapability(self: *Request, capability: Capability) !u32 {
         const pending = try self.pendingState();
+        if (pending.caps.items.len >= @as(usize, self.connection.limits.max_cap_table_entries)) {
+            return error.CapTableLimitExceeded;
+        }
         const index: u32 = @intCast(pending.caps.items.len);
         try pending.caps.append(self.connection.allocator, capability.retain());
         return index;
@@ -804,9 +818,27 @@ pub const BootstrapPromise = struct {
     }
 };
 
+/// Resource limits applied to one connection.
+///
+/// Defaults are deliberately generous for in-process and small RPC uses.
+/// Applications exposed to untrusted peers should tune these down and set
+/// `max_message_bytes` (the Unix transport also has its own framing limit).
+pub const Limits = struct {
+    max_cap_table_entries: u32 = 4096,
+    max_pending_calls_per_promise: u32 = 1024,
+    max_live_questions: u32 = 4096,
+    max_live_answers: u32 = 4096,
+    max_live_imports: u32 = 8192,
+    max_live_exports: u32 = 8192,
+    /// Optional whole-message limit checked after the transport receives a
+    /// frame. `null` leaves the limit to the transport/parser.
+    max_message_bytes: ?usize = null,
+};
+
 pub const Connection = struct {
     allocator: std.mem.Allocator,
     transport: Transport,
+    limits: Limits = .{},
     /// Optional blocking-wait hook; see `Waker`.
     waker: ?Waker = null,
     bootstrap_capability: Capability = .none,
@@ -872,8 +904,10 @@ pub const Connection = struct {
         // Answer-held capabilities may reference imports, exports, or questions,
         // so release them before tearing those tables down.
         while (self.answers.count() != 0) {
-            var answer_it = self.answers.iterator();
-            const question_id = answer_it.next().?.key_ptr.*;
+            const question_id = blk: {
+                var answer_it = self.answers.keyIterator();
+                break :blk answer_it.next().?.*;
+            };
             var answer = self.answers.fetchRemove(question_id).?.value;
             for (answer.held_caps.items) |capability| capability.release();
             answer.held_caps.deinit(self.allocator);
@@ -888,20 +922,25 @@ pub const Connection = struct {
         self.answers.deinit();
 
         // Remove each entry before destroying it: releasing a capability may
-        // recursively destroy another export or import, and hash maps must not
-        // be mutated while they are being iterated.
+        // recursively destroy another export or import. Snapshot one key with
+        // a short-lived iterator so the map is never mutated while an iterator
+        // is still live.
         while (self.exports.count() != 0) {
-            var export_it = self.exports.valueIterator();
-            const entry = export_it.next().?.*;
-            _ = self.exports.remove(entry.export_id);
+            const export_id = blk: {
+                var export_it = self.exports.keyIterator();
+                break :blk export_it.next().?.*;
+            };
+            const entry = self.exports.fetchRemove(export_id).?.value;
             self.destroyExport(entry);
         }
         self.exports.deinit();
 
         while (self.imports.count() != 0) {
-            var import_it = self.imports.valueIterator();
-            const entry = import_it.next().?.*;
-            _ = self.imports.remove(entry.export_id);
+            const import_id = blk: {
+                var import_it = self.imports.keyIterator();
+                break :blk import_it.next().?.*;
+            };
+            const entry = self.imports.fetchRemove(import_id).?.value;
             self.destroyImport(entry);
         }
         self.imports.deinit();
@@ -917,9 +956,11 @@ pub const Connection = struct {
         self.answer_capabilities.deinit(self.allocator);
 
         while (self.questions.count() != 0) {
-            var question_it = self.questions.valueIterator();
-            const question = question_it.next().?.*;
-            _ = self.questions.remove(question.id);
+            const question_id = blk: {
+                var question_it = self.questions.keyIterator();
+                break :blk question_it.next().?.*;
+            };
+            const question = self.questions.fetchRemove(question_id).?.value;
             question.param_export_ids.deinit(self.allocator);
             self.allocator.destroy(question);
         }
@@ -937,9 +978,11 @@ pub const Connection = struct {
 
     fn destroyRemainingLocals(self: *Connection) void {
         while (self.locals.count() != 0) {
-            var it = self.locals.valueIterator();
-            const entry = it.next().?.*;
-            _ = self.locals.remove(entry.key);
+            const key = blk: {
+                var it = self.locals.keyIterator();
+                break :blk it.next().?.*;
+            };
+            const entry = self.locals.fetchRemove(key).?.value;
             if (entry.capability.destroy) |destroy| destroy(dispatchContext(entry.capability.context));
             self.allocator.destroy(entry);
         }
@@ -990,6 +1033,55 @@ pub const Connection = struct {
 
     fn noteError(self: *Connection, err: anyerror) void {
         if (self.pending_error == null) self.pending_error = err;
+    }
+
+    /// Errors that represent a malformed or unsupported peer message. These
+    /// are reported with an Abort before the connection is closed.
+    fn isProtocolError(err: anyerror) bool {
+        return switch (err) {
+            error.InvalidMessage,
+            error.UnsupportedMessage,
+            error.UnsupportedCapability,
+            error.UnsupportedTarget,
+            error.UnsupportedTransform,
+            error.UnsupportedSendResultsTo,
+            error.UnknownCapability,
+            error.UnknownAnswer,
+            error.UnknownInterface,
+            error.InvalidResponse,
+            error.InvalidReturn,
+            error.InvalidAnswer,
+            error.InvalidCapability,
+            error.InvalidPointer,
+            error.DuplicateQuestion,
+            error.CyclicResolve,
+            error.MessageTooLarge,
+            error.CapTableLimitExceeded,
+            error.PendingCallLimitExceeded,
+            error.QuestionLimitExceeded,
+            error.AnswerLimitExceeded,
+            error.ImportLimitExceeded,
+            error.ExportLimitExceeded,
+            error.LimitExceeded,
+            error.OutOfBounds,
+            error.OffsetOverflow,
+            error.TypeMismatch,
+            error.TraversalLimitExceeded,
+            error.DepthLimitExceeded,
+            error.SegmentLimitReached,
+            error.NotInitialized,
+            error.RootAlreadyInitialized,
+            error.AlreadyInitialized,
+            error.InvalidText,
+            => true,
+            else => false,
+        };
+    }
+
+    fn failConnectionClassified(self: *Connection, err: anyerror) anyerror {
+        if (isProtocolError(err)) return self.failConnection(err, .failed);
+        self.lifecycle = .closed;
+        return err;
     }
 
     /// Mark the connection unusable and notify the peer. Used for protocol
@@ -1069,22 +1161,35 @@ pub const Connection = struct {
         self.waker = waker;
     }
 
+    pub fn setLimits(self: *Connection, limits: Limits) void {
+        self.limits = limits;
+    }
+
     /// Process all currently available messages and flush buffered output.
     /// This never waits for the transport.
     pub fn step(self: *Connection) !void {
         if (self.lifecycle == .closed) return error.EndOfStream;
         if (self.pending_error) |err| {
             self.pending_error = null;
-            return err;
+            return self.failConnectionClassified(err);
         }
-        while (try self.transport.receive(self.allocator)) |bytes| {
+        while (true) {
+            const maybe_bytes = self.transport.receive(self.allocator) catch |err| {
+                return self.failConnectionClassified(err);
+            };
+            const bytes = maybe_bytes orelse break;
             defer self.allocator.free(bytes);
-            self.handle(bytes) catch |err| return self.failConnection(err, .failed);
+
+            if (self.limits.max_message_bytes) |max| {
+                if (bytes.len > max) return self.failConnectionClassified(error.MessageTooLarge);
+            }
+
+            self.handle(bytes) catch |err| return self.failConnectionClassified(err);
             if (self.dispatch_depth == 0) {
-                self.drainDeferredCalls() catch |err| return self.failConnection(err, .failed);
+                self.drainDeferredCalls() catch |err| return self.failConnectionClassified(err);
             }
         }
-        try self.transport.flush();
+        self.transport.flush() catch |err| return self.failConnectionClassified(err);
     }
 
     fn waitForProgress(self: *Connection) !void {
@@ -1143,7 +1248,7 @@ pub const Connection = struct {
     }
 
     pub fn newPromise(self: *Connection) !Capability {
-        const export_id = self.allocExportId();
+        const export_id = try self.allocExportId();
         const entry = try self.allocator.create(ExportEntry);
         errdefer self.allocator.destroy(entry);
         entry.* = .{
@@ -1390,6 +1495,9 @@ pub const Connection = struct {
     }
 
     fn newQuestion(self: *Connection) !*QuestionRef {
+        if (self.questions.count() >= @as(usize, self.limits.max_live_questions)) {
+            return error.QuestionLimitExceeded;
+        }
         const id = self.allocQuestionId();
         const question = try self.allocator.create(QuestionRef);
         errdefer self.allocator.destroy(question);
@@ -1454,7 +1562,11 @@ pub const Connection = struct {
     }
 
     fn sendRaw(self: *Connection, parts: transport.MessageParts) anyerror!void {
-        try self.transport.send(parts);
+        self.transport.send(parts) catch |err| {
+            // A failed write means the transport can no longer make progress.
+            self.lifecycle = .closed;
+            return err;
+        };
     }
 
     /// Send a message without flattening it into a single allocation.
@@ -1676,6 +1788,9 @@ pub const Connection = struct {
         question_id: u32,
         bytes: []const u8,
     ) !void {
+        if (entry.pending_calls.items.len >= @as(usize, self.limits.max_pending_calls_per_promise)) {
+            return error.PendingCallLimitExceeded;
+        }
         const copy = try self.allocator.dupe(u8, bytes);
         errdefer self.allocator.free(copy);
 
@@ -1699,6 +1814,9 @@ pub const Connection = struct {
         question_id: u32,
         bytes: []const u8,
     ) !void {
+        if (answer.pending.items.len >= @as(usize, self.limits.max_pending_calls_per_promise)) {
+            return error.PendingCallLimitExceeded;
+        }
         const copy = try self.allocator.dupe(u8, bytes);
         errdefer self.allocator.free(copy);
 
@@ -1738,6 +1856,33 @@ pub const Connection = struct {
             .imported => try self.sendException(question_id, error.ForwardingUnsupported, true),
             .answer_pipeline, .answer_promise => try self.sendException(question_id, error.UnsupportedPromisedTarget, true),
             .none => try self.sendException(question_id, error.UnknownCapability, true),
+        }
+    }
+
+    fn encodeResultCaps(
+        self: *Connection,
+        results: rpc.Payload.Builder,
+        result_caps: []const Capability,
+        local_sink: ?*?[]u8,
+        local_caps_sink: ?*std.ArrayList(Capability),
+        question_id: u32,
+    ) !void {
+        var cap_table = try results.capTable();
+        try cap_table.init(@intCast(result_caps.len));
+
+        if (local_sink != null) {
+            const caps = local_caps_sink orelse return error.MissingLocalCapSink;
+            for (result_caps, 0..) |capability, i| {
+                cap_table.get(@intCast(i)).setNone();
+                try caps.append(self.allocator, capability.retain());
+            }
+            return;
+        }
+
+        const answer = try self.ensureAnswer(question_id);
+        for (result_caps, 0..) |capability, i| {
+            const export_id = try self.encodeCapability(capability, cap_table.get(@intCast(i)));
+            if (export_id) |id| try answer.export_ids.append(self.allocator, id);
         }
     }
 
@@ -1823,21 +1968,18 @@ pub const Connection = struct {
             };
 
             if (result_caps.items.len != 0) {
-                var cap_table = try results.capTable();
-                try cap_table.init(@intCast(result_caps.items.len));
-                if (local_sink != null) {
-                    const caps = local_caps_sink orelse return error.MissingLocalCapSink;
-                    for (result_caps.items, 0..) |capability, i| {
-                        cap_table.get(@intCast(i)).setNone();
-                        try caps.append(self.allocator, capability.retain());
-                    }
-                } else {
-                    const answer = try self.ensureAnswer(question_id);
-                    for (result_caps.items, 0..) |capability, i| {
-                        const export_id = try self.encodeCapability(capability, cap_table.get(@intCast(i)));
-                        if (export_id) |id| try answer.export_ids.append(self.allocator, id);
-                    }
-                }
+                self.encodeResultCaps(
+                    results,
+                    result_caps.items,
+                    local_sink,
+                    local_caps_sink,
+                    question_id,
+                ) catch |err| {
+                    var exception = try return_.setException();
+                    return_.setReleaseParamCaps(local_sink != null);
+                    try exception.setReason(@errorName(err));
+                    exception.setType(.failed);
+                };
             }
 
             break :dispatch try self.serializeMessage(&message);
@@ -1871,6 +2013,11 @@ pub const Connection = struct {
     }
 
     fn ensureAnswer(self: *Connection, question_id: u32) !*AnswerState {
+        if (!self.answers.contains(question_id) and
+            self.answers.count() >= @as(usize, self.limits.max_live_answers))
+        {
+            return error.AnswerLimitExceeded;
+        }
         const entry = try self.answers.getOrPut(question_id);
         if (!entry.found_existing) entry.value_ptr.* = .{};
         return entry.value_ptr;
@@ -1941,6 +2088,7 @@ pub const Connection = struct {
 
         const cap_index = try value.asCapability();
         const cap_table = try payload.capTable();
+        try self.checkCapTableLength(cap_table.length);
         if (cap_index >= cap_table.length) return error.InvalidCapability;
         return self.decodeAnswerCapability(cap_table.get(cap_index));
     }
@@ -1974,6 +2122,7 @@ pub const Connection = struct {
 
         const cap_index = try value.asCapability();
         const cap_table = try payload.capTable();
+        try self.checkCapTableLength(cap_table.length);
         if (cap_index >= cap_table.length) return error.InvalidCapability;
         return self.decodeAnswerCapability(cap_table.get(cap_index));
     }
@@ -2096,13 +2245,54 @@ pub const Connection = struct {
             return;
         };
 
-        if (!isNone(entry.resolved)) {
-            entry.resolved.release();
-            entry.resolved = .none;
-        }
-
         if (descriptor) |descriptor_value| {
-            entry.resolved = try self.decodeCapability(descriptor_value);
+            // `senderHosted`/`senderPromise` ids are in the sender's export
+            // table, the same table `promiseId` names. Resolving a promise to
+            // itself must be rejected.
+            if (descriptor_value.senderHosted()) |id| {
+                if (id == promise_id) return error.CyclicResolve;
+            }
+            if (descriptor_value.senderPromise()) |id| {
+                if (id == promise_id) return error.CyclicResolve;
+            }
+
+            const target = try self.decodeCapability(descriptor_value);
+            errdefer target.release();
+
+            if (self.wouldCreateResolveCycle(entry, target)) return error.CyclicResolve;
+
+            if (!isNone(entry.resolved)) {
+                entry.resolved.release();
+                entry.resolved = .none;
+            }
+            entry.resolved = target;
+        } else {
+            if (!isNone(entry.resolved)) {
+                entry.resolved.release();
+                entry.resolved = .none;
+            }
+        }
+    }
+
+    fn wouldCreateResolveCycle(
+        self: *Connection,
+        entry: *ImportEntry,
+        target: Capability,
+    ) bool {
+        var current = target;
+        var remaining = self.imports.count();
+        while (true) {
+            switch (current) {
+                .imported => |imported| {
+                    if (imported == entry) return true;
+                    // A chain longer than the table has a cycle we did not
+                    // start at `entry`; reject it rather than looping forever.
+                    if (remaining == 0) return true;
+                    remaining -= 1;
+                    current = imported.resolved;
+                },
+                else => return false,
+            }
         }
     }
 
@@ -2137,8 +2327,15 @@ pub const Connection = struct {
         try self.sendRaw(.{ .header = bytes });
     }
 
+    fn checkCapTableLength(self: *Connection, length: usize) !void {
+        if (length > @as(usize, self.limits.max_cap_table_entries)) {
+            return error.CapTableLimitExceeded;
+        }
+    }
+
     fn decodeCapTable(self: *Connection, payload: rpc.Payload.Reader) ![]Capability {
         const cap_table = try payload.capTable();
+        try self.checkCapTableLength(cap_table.length);
         var caps = std.ArrayList(Capability).empty;
         errdefer {
             for (caps.items) |capability| capability.release();
@@ -2194,6 +2391,9 @@ pub const Connection = struct {
             entry.wire_refs += 1;
             entry.handle_refs += 1;
             return .{ .imported = entry };
+        }
+        if (self.imports.count() >= @as(usize, self.limits.max_live_imports)) {
+            return error.ImportLimitExceeded;
         }
 
         const entry = try self.allocator.create(ImportEntry);
@@ -2305,7 +2505,7 @@ pub const Connection = struct {
     }
 
     fn allocExport(self: *Connection, capability: Capability) !*ExportEntry {
-        const export_id = self.allocExportId();
+        const export_id = try self.allocExportId();
         const entry = try self.allocator.create(ExportEntry);
         errdefer self.allocator.destroy(entry);
         entry.* = .{
@@ -2437,7 +2637,10 @@ pub const Connection = struct {
         }
     }
 
-    fn allocExportId(self: *Connection) u32 {
+    fn allocExportId(self: *Connection) !u32 {
+        if (self.exports.count() >= @as(usize, self.limits.max_live_exports)) {
+            return error.ExportLimitExceeded;
+        }
         while (true) {
             const id = self.next_export_id;
             self.next_export_id +%= 1;

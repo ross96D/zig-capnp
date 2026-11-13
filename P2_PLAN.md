@@ -1,6 +1,6 @@
 # P2 Plan: Structure, Scheduling, and Performance
 
-Status: P2.3 complete; P2.4 next
+Status: P2.4 complete; P2.5 next
 Started: 2026-11-12
 
 ## Decisions
@@ -135,22 +135,36 @@ Started: 2026-11-12
   | `scripted-cap-pass` | 31,901 ns | 1,573 ns | 1,334 ns |
   | `scripted-pipeline` | 48,167 ns | 2,744 ns | 2,255 ns |
 
-### P2.4 — Teardown and robustness
+### P2.4 — Teardown and robustness (complete)
 
-- Fix hash-map mutation while iterating in `Connection.deinit`:
-  - snapshot keys or use a worklist instead of removing while a map iterator
-    is live.
-- Reject self-referential/cyclic `Resolve` descriptors.
-- Add limits:
-  - max cap-table entries per message
-  - max pending calls per promise/answer
-  - max live questions/answers/imports/exports
-  - optional runtime message-size limit
-- Classify fatal errors consistently:
-  - malformed/protocol errors -> `Abort` + close
-  - OOM/transport failure -> close
-  - handler failure -> `Return.exception`
-- Add teardown tests with outstanding questions and capabilities.
+- [x] Fixed hash-map mutation while iterating in `Connection.deinit` and
+  `destroyRemainingLocals`: the teardown loops snapshot one key with a
+  short-lived `keyIterator`, then `fetchRemove` the entry before releasing it.
+  This is safe when a destroy callback recursively removes another entry.
+- [x] Reject self-referential/cyclic `Resolve` descriptors:
+  - direct `senderHosted`/`senderPromise` targets naming the promise itself
+  - indirect cycles through the resolved-import chain
+- [x] Added per-connection `Limits` (tunable with `setLimits`):
+  - `max_cap_table_entries`
+  - `max_pending_calls_per_promise` (promise exports and answer queues)
+  - `max_live_questions`
+  - `max_live_answers`
+  - `max_live_imports`
+  - `max_live_exports`
+  - optional `max_message_bytes`
+- [x] Classified connection failures consistently in `step`:
+  - malformed/protocol/limit errors -> `Abort` + close
+  - OOM/transport failure -> close without an Abort
+  - handler failure -> `Return.exception`, connection stays open
+  - errors while encoding a handler's result capabilities are converted into
+    `Return.exception` rather than aborting the connection
+- [x] Added teardown/robustness tests:
+  - deinit with outstanding questions, answers, stored Returns, imports, and
+    result exports
+  - oversized inbound message abort
+  - self-referential and two-node cyclic `Resolve`
+  - cap-table, pending-call, question, answer, import, and export limits
+    (representative coverage)
 
 ### P2.5 — Generated bindings and `Side` cleanup (Linux-only)
 

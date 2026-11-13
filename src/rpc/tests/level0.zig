@@ -72,4 +72,8 @@ test "level 0 remote exception is returned" {
     try testing.expectEqual(rpc.Return.Tag.exception, try response.which());
     const exception = (try response.exception()) orelse return error.MissingException;
     try testing.expectEqualStrings("MethodFailed", try exception.reason());
+
+    // A handler failure is a call-level exception, not a protocol failure.
+    try testing.expect(!client.isClosed());
+    try testing.expect(!server.isClosed());
 }

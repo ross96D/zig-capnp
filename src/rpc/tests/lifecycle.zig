@@ -27,6 +27,20 @@ fn serializeMessage(message: capnp.MessageBuilder) ![]u8 {
     return bytes;
 }
 
+fn buildResolve(promise_id: u32, target_id: u32) ![]u8 {
+    var message = capnp.MessageBuilder{ .allocator = testing.allocator };
+    try message.init();
+    defer message.deinit();
+
+    var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
+    var resolve = try root.setResolve();
+    resolve.setPromiseId(promise_id);
+    const cap = try resolve.setCap();
+    cap.setSenderPromise(target_id);
+
+    return serializeMessage(message);
+}
+
 test "send failure releases its question" {
     const pair = try driver.LoopbackPair.init(testing.allocator);
     defer pair.deinit();
@@ -433,4 +447,301 @@ test "deep local call nesting" {
     defer response.deinit();
     const payload = try response.payload();
     try testing.expectEqualStrings("done", try (try payload.content()).asText());
+}
+
+test "limit: cap table entries" {
+    var loopback = transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    const conn = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer conn.deinit();
+    conn.setLimits(.{ .max_cap_table_entries = 1 });
+
+    const capability = try conn.initLocal(.{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    });
+    defer capability.release();
+
+    var request = try conn.beginCall(capability, EchoInterface.id, 0);
+    defer request.deinit();
+
+    _ = try request.addCapability(capability);
+    try testing.expectError(error.CapTableLimitExceeded, request.addCapability(capability));
+}
+
+test "limit: live questions" {
+    var loopback = transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    const conn = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer conn.deinit();
+    conn.setLimits(.{ .max_live_questions = 1 });
+
+    var first = try conn.bootstrapStart();
+    defer first.deinit();
+
+    try testing.expectError(error.QuestionLimitExceeded, conn.bootstrapStart());
+}
+
+test "limit: live exports" {
+    var loopback = transports.Loopback.init(testing.allocator);
+    defer loopback.deinit();
+
+    const conn = try connection.Connection.init(testing.allocator, loopback.endpoint(.server));
+    defer conn.deinit();
+    conn.setLimits(.{ .max_live_exports = 0 });
+
+    try testing.expectError(error.ExportLimitExceeded, conn.newPromise());
+}
+
+test "limit: live imports" {
+    const pair = try driver.LoopbackPair.init(testing.allocator);
+    defer pair.deinit();
+
+    const server = pair.server;
+    const client = pair.client;
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    server.setBootstrap(try server.initLocal(.{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    }));
+
+    const provider = try client.bootstrap();
+
+    // The bootstrap import already occupies the single allowed slot.
+    client.setLimits(.{ .max_live_imports = 1 });
+
+    var request = try client.beginCall(provider, ProviderInterface.id, 0);
+    var response = try request.send();
+    defer response.deinit();
+
+    try testing.expectError(error.ImportLimitExceeded, response.capability(0));
+}
+
+test "limit: live answers" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer provider.release();
+
+    // The bootstrap answer is still live. Do not allow a second one.
+    server.setLimits(.{ .max_live_answers = @intCast(server.answers.count()) });
+
+    var request = try client.beginCall(provider, ProviderInterface.id, 0);
+    defer request.deinit();
+    var pending = try request.start();
+    defer pending.deinit();
+
+    _ = try link.deliverNext(.client);
+    try testing.expectError(error.AnswerLimitExceeded, server.step());
+    try testing.expect(server.isClosed());
+}
+
+test "protocol: oversized message aborts" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const conn = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer conn.deinit();
+    conn.setLimits(.{ .max_message_bytes = 8 });
+
+    try link.inject(.client, "0123456789");
+    try testing.expectError(error.MessageTooLarge, conn.step());
+    try testing.expect(conn.isClosed());
+}
+
+test "protocol: self-referential Resolve aborts" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer provider.release();
+
+    var promise_request = try client.beginCall(provider, ProviderInterface.id, 2);
+    defer promise_request.deinit();
+    var promise_pending = try promise_request.start();
+    defer promise_pending.deinit();
+    try scriptedPump(client, server, &link);
+    var promise_response = try promise_pending.wait();
+    defer promise_response.deinit();
+
+    const promise = try promise_response.capability(0);
+    defer promise.release();
+    const promise_id = promise.imported.export_id;
+
+    const resolve = try buildResolve(promise_id, promise_id);
+    try link.pushInbox(.client, resolve);
+    try testing.expectError(error.CyclicResolve, client.step());
+    try testing.expect(client.isClosed());
+}
+
+test "protocol: cyclic Resolve chain aborts" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer provider.release();
+
+    var first_request = try client.beginCall(provider, ProviderInterface.id, 2);
+    defer first_request.deinit();
+    var first_pending = try first_request.start();
+    defer first_pending.deinit();
+    try scriptedPump(client, server, &link);
+    var first_response = try first_pending.wait();
+    defer first_response.deinit();
+    const first = try first_response.capability(0);
+    defer first.release();
+
+    var second_request = try client.beginCall(provider, ProviderInterface.id, 2);
+    defer second_request.deinit();
+    var second_pending = try second_request.start();
+    defer second_pending.deinit();
+    try scriptedPump(client, server, &link);
+    var second_response = try second_pending.wait();
+    defer second_response.deinit();
+    const second = try second_response.capability(0);
+    defer second.release();
+
+    const first_id = first.imported.export_id;
+    const second_id = second.imported.export_id;
+
+    const resolve_first = try buildResolve(first_id, second_id);
+    try link.pushInbox(.client, resolve_first);
+    const resolve_second = try buildResolve(second_id, first_id);
+    try link.pushInbox(.client, resolve_second);
+
+    try testing.expectError(error.CyclicResolve, client.step());
+    try testing.expect(client.isClosed());
+}
+
+test "limit: pending calls on a promise" {
+    var link = transports.Scripted.init(testing.allocator);
+    defer link.deinit();
+
+    const server = try connection.Connection.init(testing.allocator, link.endpoint(.server));
+    defer server.deinit();
+
+    const client = try connection.Connection.init(testing.allocator, link.endpoint(.client));
+    defer client.deinit();
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    const provider = try scriptedBootstrap(server, client, &link, .{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    });
+    defer provider.release();
+
+    var promise_request = try client.beginCall(provider, ProviderInterface.id, 2);
+    defer promise_request.deinit();
+    var promise_pending = try promise_request.start();
+    defer promise_pending.deinit();
+    try scriptedPump(client, server, &link);
+    var promise_response = try promise_pending.wait();
+    defer promise_response.deinit();
+    const promise = try promise_response.capability(0);
+    defer promise.release();
+
+    server.setLimits(.{ .max_pending_calls_per_promise = 0 });
+
+    var queued_request = try client.beginCall(promise, ProviderInterface.id, 0);
+    defer queued_request.deinit();
+    var queued_pending = try queued_request.start();
+    defer queued_pending.deinit();
+
+    _ = try link.deliverNext(.client);
+    try testing.expectError(error.PendingCallLimitExceeded, server.step());
+    try testing.expect(server.isClosed());
+}
+
+test "teardown with outstanding questions, answers, and returns" {
+    const pair = try driver.LoopbackPair.init(testing.allocator);
+    defer pair.deinit();
+
+    const server = pair.server;
+    const client = pair.client;
+
+    var state = ProviderState{ .echo = .{
+        .context = null,
+        .interface_id = EchoInterface.id,
+        .dispatch = EchoInterface.dispatch,
+    } };
+    server.setBootstrap(try server.initLocal(.{
+        .context = &state,
+        .interface_id = ProviderInterface.id,
+        .dispatch = ProviderInterface.dispatch,
+    }));
+
+    const provider = try client.bootstrap();
+
+    var i: usize = 0;
+    while (i < 3) : (i += 1) {
+        var request = try client.beginCall(provider, ProviderInterface.id, 0);
+        _ = try request.start();
+        request.deinit();
+    }
+
+    try pair.pump();
+
+    try testing.expectEqual(@as(usize, 3), client.questions.count());
+    try testing.expectEqual(@as(usize, 3), client.returns.count());
+    try testing.expectEqual(@as(usize, 3), server.answers.count());
 }

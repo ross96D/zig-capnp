@@ -8,6 +8,7 @@ pub const connection = @import("connection.zig");
 pub const driver = @import("driver.zig");
 
 pub const Connection = connection.Connection;
+pub const Limits = connection.Limits;
 pub const Waker = connection.Waker;
 pub const Capability = connection.Capability;
 pub const BootstrapPromise = connection.BootstrapPromise;
@@ -23,5 +24,6 @@ pub const rpc = connection.rpc;
 pub const transport = connection.transport;
 pub const Side = connection.Side;
 pub const Transport = connection.Transport;
+pub const MessageParts = connection.transport.MessageParts;
 
 pub const transports = @import("transports/mod.zig");

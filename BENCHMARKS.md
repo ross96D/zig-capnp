@@ -50,6 +50,8 @@ Values are medians of three runs.
   `std.Io.Writer.Allocating` from the RPC send path. `MessageBuilder` now
   exposes `serializedSize`, `writeHeader`, `writeToBuffer`, and
   `segmentSlices`; transports send `MessageParts` directly.
+- P2.4 adds teardown/limit checks but does not intentionally change the hot
+  path; benchmark runs remain within normal run-to-run noise.
 
 ## Comparison log
 
