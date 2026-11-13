@@ -232,10 +232,3 @@ pub fn messageSize(input: []const u8) PackedError!usize {
     if (segment_index != segment_count) return PackedError.InvalidPacked;
     return std.math.cast(usize, total) orelse PackedError.SizeOverflow;
 }
-
-fn allZero(word: []const u8) bool {
-    for (word) |byte| {
-        if (byte != 0) return false;
-    }
-    return true;
-}
