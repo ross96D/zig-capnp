@@ -10,8 +10,7 @@ pub fn main() !void {
     defer builder.deinit();
 
     var polyline = try builder.initRootStruct(point.Polyline.Builder, point.Polyline.builder_trait);
-    var points = try polyline.points();
-    try points.init(3);
+    var points = try polyline.initPoints(3);
     for (0..3) |i| {
         var p = points.get(@intCast(i));
         p.setX(@intCast(i * 10));

@@ -474,7 +474,7 @@ test "generated struct copyFrom copies all field kinds" {
     defer dst_builder.deinit();
 
     var dst = try dst_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
-    try dst.copyFrom(src_reader);
+    dst.copyFrom(src_reader);
 
     var dst_message = dst_builder.toReader();
     const got = try dst_message.getRootStruct(features.Features.Reader, features.Features.reader_trait);
@@ -563,7 +563,7 @@ test "generated composite list copyFrom" {
     defer whole_builder.deinit();
 
     var whole = try whole_builder.initRootStruct(composite.Lists.Builder, composite.Lists.builder_trait);
-    try whole.copyFrom(src_reader);
+    whole.copyFrom(src_reader);
 
     var whole_message = whole_builder.toReader();
     const whole_reader = try whole_message.getRootStruct(composite.Lists.Reader, composite.Lists.reader_trait);
@@ -608,7 +608,7 @@ test "generated union and group copyFrom" {
     defer union_dst_builder.deinit();
 
     var union_dst = try union_dst_builder.initRootStruct(unions.UnionTestList.Builder, unions.UnionTestList.builder_trait);
-    try union_dst.copyFrom(union_reader);
+    union_dst.copyFrom(union_reader);
 
     var union_dst_message = union_dst_builder.toReader();
     const union_got = try union_dst_message.getRootStruct(unions.UnionTestList.Reader, unions.UnionTestList.reader_trait);
@@ -625,7 +625,7 @@ test "generated union and group copyFrom" {
     defer group_dst_builder.deinit();
 
     var group_dst = try group_dst_builder.initRootStruct(groups.WithGroup.Builder, groups.WithGroup.builder_trait);
-    try group_dst.copyFrom(group_reader);
+    group_dst.copyFrom(group_reader);
 
     var group_dst_message = group_dst_builder.toReader();
     const group_got = try group_dst_message.getRootStruct(groups.WithGroup.Reader, groups.WithGroup.reader_trait);
@@ -647,7 +647,7 @@ test "generated builder copyFrom accepts asReader" {
     defer dst_builder.deinit();
 
     var dst = try dst_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
-    try dst.copyFrom(src.asReader());
+    dst.copyFrom(src.asReader());
 
     var dst_message = dst_builder.toReader();
     const got = try dst_message.getRootStruct(features.Features.Reader, features.Features.reader_trait);

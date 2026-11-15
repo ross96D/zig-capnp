@@ -50,6 +50,14 @@ pub const Point = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.Point.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Point.Reader) capnp.BuildError!void {
+            try self.builder.copyContentFrom(source.reader);
+        }
+
         pub fn x(self: @This()) i32 {
             return self.builder.readIntField(i32, 0) ^ 0;
         }
@@ -72,6 +80,14 @@ pub const Point = struct {
 
         pub fn setName(self: @This(), v: [:0]const u8) capnp.BuildError!void {
             try self.builder.writeStringField(0, v);
+        }
+
+        pub fn initName(self: @This(), length: u32) capnp.BuildError!capnp.ListBuilder(u8) {
+            return self.builder.initTextField(0, length);
+        }
+
+        pub fn hasName(self: @This()) bool {
+            return self.builder.hasPtrField(0);
         }
     };
 
@@ -120,12 +136,35 @@ pub const Polyline = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.Polyline.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Polyline.Reader) capnp.BuildError!void {
+            try self.builder.copyContentFrom(source.reader);
+        }
+
         pub fn points(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Point.Builder, _Root.Point.builder_trait) {
-            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Point.Builder, _Root.Point.builder_trait), 0);
+            return try self.builder.getCompositeListField(_Root.Point.Builder, _Root.Point.builder_trait, 0);
+        }
+
+        pub fn initPoints(self: @This(), length: u29) capnp.BuildError!capnp.CompositeListBuilder(_Root.Point.Builder, _Root.Point.builder_trait) {
+            var value = self.builder.initCompositeListField(_Root.Point.Builder, _Root.Point.builder_trait, 0);
+            try value.init(length);
+            return value;
         }
 
         pub fn setPoints(self: @This()) capnp.CompositeListBuilder(_Root.Point.Builder, _Root.Point.builder_trait) {
-            return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Point.Builder, _Root.Point.builder_trait), 0);
+            return self.builder.initCompositeListField(_Root.Point.Builder, _Root.Point.builder_trait, 0);
+        }
+
+        pub fn setPointsFrom(self: @This(), v: capnp.CompositeListReader(_Root.Point.Reader, _Root.Point.reader_trait)) capnp.BuildError!void {
+            var value = self.builder.initCompositeListField(_Root.Point.Builder, _Root.Point.builder_trait, 0);
+            try value.copyFrom(v);
+        }
+
+        pub fn hasPoints(self: @This()) bool {
+            return self.builder.hasPtrField(0);
         }
     };
 

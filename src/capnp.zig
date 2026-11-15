@@ -1454,7 +1454,7 @@ fn writeObjectPointer(pointer: *BuildContext, object: Object, payload: Ptr) Buil
 }
 
 pub const MessageBuilder = struct {
-    allocator: Allocator = std.heap.page_allocator,
+    allocator: Allocator,
     // Capacity for the next new segment. Grows geometrically, capped at max_segment_bytes.
     next_segment_bytes: u32 = 1 << 16,
     segment_store: [16][]u8 = std.mem.zeroes([16][]u8),
