@@ -108,6 +108,14 @@ pub const VatId = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.VatId.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.VatId.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         pub fn side(self: @This()) _Root.Side {
             return @fromBackingInt(@intCast(self.builder.readIntField(u16, 0) ^ 0));
         }
@@ -164,6 +172,14 @@ pub const ProvisionId = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.ProvisionId.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.ProvisionId.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         /// The ID from `JoinKeyPart`.
         pub fn joinId(self: @This()) u32 {
             return self.builder.readIntField(u32, 0) ^ 0;
@@ -215,6 +231,14 @@ pub const RecipientId = struct {
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
+
+        pub fn asReader(self: @This()) _Root.RecipientId.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.RecipientId.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -257,6 +281,14 @@ pub const ThirdPartyCapId = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.ThirdPartyCapId.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.ThirdPartyCapId.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
     };
 
@@ -347,6 +379,14 @@ pub const JoinKeyPart = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.JoinKeyPart.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.JoinKeyPart.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         /// A number identifying this join, chosen by the sender.  May be reused once `Finish` messages are
         /// sent corresponding to all of the `Join` messages.
         pub fn joinId(self: @This()) u32 {
@@ -432,6 +472,14 @@ pub const JoinResult = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.JoinResult.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.JoinResult.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         /// Matches `JoinKeyPart`.

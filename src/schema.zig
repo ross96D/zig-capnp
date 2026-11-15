@@ -4,9 +4,6 @@
 const _Root = @This();
 const capnp = @import("capnp");
 
-pub const annotations = struct {
-    // unsupported annotation namespace: interface values are not implemented
-};
 pub const Node = struct {
     pub const id: u64 = 0xe682ab4cf923a417;
 
@@ -101,6 +98,7 @@ pub const Node = struct {
             pub fn fields(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Field.Reader, _Root.Field.reader_trait) {
                 return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Field.Reader, _Root.Field.reader_trait), 3);
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -116,6 +114,14 @@ pub const Node = struct {
 
             pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+            }
+
+            pub fn asReader(self: @This()) _Root.Node.@"struct".Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Node.@"struct".Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
             }
 
             /// Size of the data section, in words.
@@ -209,6 +215,8 @@ pub const Node = struct {
             pub fn setFields(self: @This()) capnp.CompositeListBuilder(_Root.Field.Builder, _Root.Field.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Field.Builder, _Root.Field.builder_trait), 3);
             }
+
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -216,6 +224,7 @@ pub const Node = struct {
             .ptr_words = 6,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const @"enum" = struct {
@@ -240,6 +249,7 @@ pub const Node = struct {
             pub fn enumerants(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Enumerant.Reader, _Root.Enumerant.reader_trait) {
                 return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Enumerant.Reader, _Root.Enumerant.reader_trait), 3);
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -257,6 +267,14 @@ pub const Node = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Node.@"enum".Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Node.@"enum".Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             /// Enumerants ordered by numeric value (ordinal).
             pub fn enumerants(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Enumerant.Builder, _Root.Enumerant.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Enumerant.Builder, _Root.Enumerant.builder_trait), 3);
@@ -265,6 +283,8 @@ pub const Node = struct {
             pub fn setEnumerants(self: @This()) capnp.CompositeListBuilder(_Root.Enumerant.Builder, _Root.Enumerant.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Enumerant.Builder, _Root.Enumerant.builder_trait), 3);
             }
+
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -272,6 +292,7 @@ pub const Node = struct {
             .ptr_words = 6,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const interface = struct {
@@ -301,6 +322,7 @@ pub const Node = struct {
             pub fn superclasses(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Superclass.Reader, _Root.Superclass.reader_trait) {
                 return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Superclass.Reader, _Root.Superclass.reader_trait), 4);
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -318,6 +340,14 @@ pub const Node = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Node.interface.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Node.interface.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             /// Methods ordered by ordinal.
             pub fn methods(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Method.Builder, _Root.Method.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Method.Builder, _Root.Method.builder_trait), 3);
@@ -327,6 +357,7 @@ pub const Node = struct {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Method.Builder, _Root.Method.builder_trait), 3);
             }
 
+
             /// Superclasses of this interface.
             pub fn superclasses(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Superclass.Builder, _Root.Superclass.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Superclass.Builder, _Root.Superclass.builder_trait), 4);
@@ -335,6 +366,8 @@ pub const Node = struct {
             pub fn setSuperclasses(self: @This()) capnp.CompositeListBuilder(_Root.Superclass.Builder, _Root.Superclass.builder_trait) {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Superclass.Builder, _Root.Superclass.builder_trait), 4);
             }
+
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -342,6 +375,7 @@ pub const Node = struct {
             .ptr_words = 6,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const @"const" = struct {
@@ -369,6 +403,7 @@ pub const Node = struct {
             pub fn value(self: @This()) capnp.Error!_Root.Value.Reader {
                 return try self.reader.readPtrField(_Root.Value.Reader, 4);
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -386,6 +421,14 @@ pub const Node = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Node.@"const".Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Node.@"const".Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn @"type"(self: @This()) capnp.BuildError!_Root.Type.Builder {
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 3);
             }
@@ -394,6 +437,7 @@ pub const Node = struct {
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 3);
             }
 
+
             pub fn value(self: @This()) capnp.BuildError!_Root.Value.Builder {
                 return try self.builder.buildStructField(_Root.Value.Builder, _Root.Value.builder_trait, 4);
             }
@@ -401,6 +445,8 @@ pub const Node = struct {
             pub fn setValue(self: @This()) capnp.BuildError!_Root.Value.Builder {
                 return try self.builder.buildStructField(_Root.Value.Builder, _Root.Value.builder_trait, 4);
             }
+
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -408,6 +454,7 @@ pub const Node = struct {
             .ptr_words = 6,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const annotation = struct {
@@ -479,6 +526,7 @@ pub const Node = struct {
             pub fn targetsAnnotation(self: @This()) bool {
                 return self.reader.readBoolField(123) != false;
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -496,6 +544,14 @@ pub const Node = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Node.annotation.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Node.annotation.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn @"type"(self: @This()) capnp.BuildError!_Root.Type.Builder {
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 3);
             }
@@ -503,6 +559,7 @@ pub const Node = struct {
             pub fn setType(self: @This()) capnp.BuildError!_Root.Type.Builder {
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 3);
             }
+
 
             pub fn targetsFile(self: @This()) bool {
                 return self.builder.readBoolField(112) != false;
@@ -599,6 +656,7 @@ pub const Node = struct {
             pub fn setTargetsAnnotation(self: @This(), v: bool) void {
                 self.builder.writeBoolField(123, v != false);
             }
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -606,6 +664,7 @@ pub const Node = struct {
             .ptr_words = 6,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     /// Information about one of the node's parameters.
@@ -630,6 +689,7 @@ pub const Node = struct {
             pub fn name(self: @This()) capnp.Error![:0]const u8 {
                 return try self.reader.readStringField(0);
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -647,6 +707,14 @@ pub const Node = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Node.Parameter.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Node.Parameter.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn name(self: @This()) capnp.BuildError![:0]const u8 {
                 return try self.builder.readStringField(0);
             }
@@ -654,6 +722,7 @@ pub const Node = struct {
             pub fn setName(self: @This(), v: [:0]const u8) capnp.BuildError!void {
                 try self.builder.writeStringField(0, v);
             }
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -661,6 +730,7 @@ pub const Node = struct {
             .ptr_words = 1,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const NestedNode = struct {
@@ -693,6 +763,7 @@ pub const Node = struct {
             pub fn id(self: @This()) u64 {
                 return self.reader.readIntField(u64, 0) ^ 0;
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -708,6 +779,14 @@ pub const Node = struct {
 
             pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+            }
+
+            pub fn asReader(self: @This()) _Root.Node.NestedNode.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Node.NestedNode.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
             }
 
             /// Unqualified symbol name.  Unlike Node.displayName, this *can* be used programmatically.
@@ -730,6 +809,7 @@ pub const Node = struct {
             pub fn setId(self: @This(), v: u64) void {
                 self.builder.writeIntField(u64, 0, v ^ 0);
             }
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -737,6 +817,7 @@ pub const Node = struct {
             .ptr_words = 1,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     /// Additional information about a node which is not needed at runtime, but may be useful for
@@ -768,6 +849,7 @@ pub const Node = struct {
                 pub fn docComment(self: @This()) capnp.Error![:0]const u8 {
                     return try self.reader.readStringField(0);
                 }
+
             };
 
             pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -785,6 +867,14 @@ pub const Node = struct {
                     return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
                 }
 
+                pub fn asReader(self: @This()) _Root.Node.SourceInfo.Member.Reader {
+                    return .{ .reader = self.builder.asReader() };
+                }
+
+                pub fn copyFrom(self: @This(), source: _Root.Node.SourceInfo.Member.Reader) void {
+                    self.builder.copyContentFrom(source.reader) catch unreachable;
+                }
+
                 /// Doc comment on the member.
                 pub fn docComment(self: @This()) capnp.BuildError![:0]const u8 {
                     return try self.builder.readStringField(0);
@@ -793,6 +883,7 @@ pub const Node = struct {
                 pub fn setDocComment(self: @This(), v: [:0]const u8) capnp.BuildError!void {
                     try self.builder.writeStringField(0, v);
                 }
+
             };
 
             pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -800,6 +891,7 @@ pub const Node = struct {
                 .ptr_words = 1,
                 .builder = @This().Builder.fromStructBuilder,
             };
+
         };
 
         pub const Reader = struct {
@@ -843,6 +935,7 @@ pub const Node = struct {
             pub fn endByte(self: @This()) u32 {
                 return self.reader.readIntField(u32, 3) ^ 0;
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -858,6 +951,14 @@ pub const Node = struct {
 
             pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+            }
+
+            pub fn asReader(self: @This()) _Root.Node.SourceInfo.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Node.SourceInfo.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
             }
 
             /// ID of the Node which this info describes.
@@ -891,6 +992,7 @@ pub const Node = struct {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.SourceInfo.Member.Builder, _Root.Node.SourceInfo.Member.builder_trait), 1);
             }
 
+
             pub fn startByte(self: @This()) u32 {
                 return self.builder.readIntField(u32, 2) ^ 0;
             }
@@ -906,6 +1008,7 @@ pub const Node = struct {
             pub fn setEndByte(self: @This(), v: u32) void {
                 self.builder.writeIntField(u32, 3, v ^ 0);
             }
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -913,6 +1016,7 @@ pub const Node = struct {
             .ptr_words = 2,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const Reader = struct {
@@ -972,44 +1076,32 @@ pub const Node = struct {
         }
 
         pub fn file(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 6) != 0) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 6) != 0) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn @"struct"(self: @This()) ?_Root.Node.@"struct".Reader {
-            if (self.reader.readIntField(u16, 6) != 1) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 6) != 1) { return null; }
             return .{ .reader = self.reader };
         }
 
         pub fn @"enum"(self: @This()) ?_Root.Node.@"enum".Reader {
-            if (self.reader.readIntField(u16, 6) != 2) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 6) != 2) { return null; }
             return .{ .reader = self.reader };
         }
 
         pub fn interface(self: @This()) ?_Root.Node.interface.Reader {
-            if (self.reader.readIntField(u16, 6) != 3) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 6) != 3) { return null; }
             return .{ .reader = self.reader };
         }
 
         pub fn @"const"(self: @This()) ?_Root.Node.@"const".Reader {
-            if (self.reader.readIntField(u16, 6) != 4) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 6) != 4) { return null; }
             return .{ .reader = self.reader };
         }
 
         pub fn annotation(self: @This()) ?_Root.Node.annotation.Reader {
-            if (self.reader.readIntField(u16, 6) != 5) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 6) != 5) { return null; }
             return .{ .reader = self.reader };
         }
 
@@ -1031,6 +1123,7 @@ pub const Node = struct {
         pub fn endByte(self: @This()) u32 {
             return self.reader.readIntField(u32, 11) ^ 0;
         }
+
     };
 
     pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -1046,6 +1139,14 @@ pub const Node = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.Node.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Node.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         pub fn which(self: @This()) _Root.Node.Tag {
@@ -1104,6 +1205,7 @@ pub const Node = struct {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.NestedNode.Builder, _Root.Node.NestedNode.builder_trait), 1);
         }
 
+
         /// Annotations applied to this node.
         pub fn annotations(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 2);
@@ -1113,10 +1215,9 @@ pub const Node = struct {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 2);
         }
 
+
         pub fn file(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 6) != 0) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 6) != 0) { return null; }
             return self.builder.readVoid();
         }
 
@@ -1126,9 +1227,7 @@ pub const Node = struct {
         }
 
         pub fn @"struct"(self: @This()) ?_Root.Node.@"struct".Builder {
-            if (self.builder.readIntField(u16, 6) != 1) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 6) != 1) { return null; }
             return .{ .builder = self.builder };
         }
 
@@ -1138,9 +1237,7 @@ pub const Node = struct {
         }
 
         pub fn @"enum"(self: @This()) ?_Root.Node.@"enum".Builder {
-            if (self.builder.readIntField(u16, 6) != 2) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 6) != 2) { return null; }
             return .{ .builder = self.builder };
         }
 
@@ -1150,9 +1247,7 @@ pub const Node = struct {
         }
 
         pub fn interface(self: @This()) ?_Root.Node.interface.Builder {
-            if (self.builder.readIntField(u16, 6) != 3) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 6) != 3) { return null; }
             return .{ .builder = self.builder };
         }
 
@@ -1162,9 +1257,7 @@ pub const Node = struct {
         }
 
         pub fn @"const"(self: @This()) ?_Root.Node.@"const".Builder {
-            if (self.builder.readIntField(u16, 6) != 4) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 6) != 4) { return null; }
             return .{ .builder = self.builder };
         }
 
@@ -1174,9 +1267,7 @@ pub const Node = struct {
         }
 
         pub fn annotation(self: @This()) ?_Root.Node.annotation.Builder {
-            if (self.builder.readIntField(u16, 6) != 5) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 6) != 5) { return null; }
             return .{ .builder = self.builder };
         }
 
@@ -1193,6 +1284,7 @@ pub const Node = struct {
         pub fn setParameters(self: @This()) capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait), 5);
         }
+
 
         /// True if this node is generic, meaning that it or one of its parent scopes has a non-empty
         /// `parameters`.
@@ -1219,6 +1311,7 @@ pub const Node = struct {
         pub fn setEndByte(self: @This(), v: u32) void {
             self.builder.writeIntField(u32, 11, v ^ 0);
         }
+
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -1226,6 +1319,7 @@ pub const Node = struct {
         .ptr_words = 6,
         .builder = @This().Builder.fromStructBuilder,
     };
+
 };
 
 /// Schema for a field of a struct.
@@ -1281,6 +1375,7 @@ pub const Field = struct {
             pub fn hadExplicitDefault(self: @This()) bool {
                 return self.reader.readBoolField(128) != false;
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -1296,6 +1391,14 @@ pub const Field = struct {
 
             pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+            }
+
+            pub fn asReader(self: @This()) _Root.Field.slot.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Field.slot.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
             }
 
             /// Offset, in units of the field's size, from the beginning of the section in which the field
@@ -1317,6 +1420,7 @@ pub const Field = struct {
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 2);
             }
 
+
             pub fn defaultValue(self: @This()) capnp.BuildError!_Root.Value.Builder {
                 return try self.builder.buildStructField(_Root.Value.Builder, _Root.Value.builder_trait, 3);
             }
@@ -1324,6 +1428,7 @@ pub const Field = struct {
             pub fn setDefaultValue(self: @This()) capnp.BuildError!_Root.Value.Builder {
                 return try self.builder.buildStructField(_Root.Value.Builder, _Root.Value.builder_trait, 3);
             }
+
 
             /// Whether the default value was specified explicitly.  Non-explicit default values are always
             /// zero or empty values.  Usually, whether the default value was explicit shouldn't matter.
@@ -1336,6 +1441,7 @@ pub const Field = struct {
             pub fn setHadExplicitDefault(self: @This(), v: bool) void {
                 self.builder.writeBoolField(128, v != false);
             }
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -1343,6 +1449,7 @@ pub const Field = struct {
             .ptr_words = 4,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     /// A group.
@@ -1368,6 +1475,7 @@ pub const Field = struct {
             pub fn typeId(self: @This()) u64 {
                 return self.reader.readIntField(u64, 2) ^ 0;
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -1385,6 +1493,14 @@ pub const Field = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Field.group.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Field.group.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             /// The ID of the group's node.
             pub fn typeId(self: @This()) u64 {
                 return self.builder.readIntField(u64, 2) ^ 0;
@@ -1393,6 +1509,7 @@ pub const Field = struct {
             pub fn setTypeId(self: @This(), v: u64) void {
                 self.builder.writeIntField(u64, 2, v ^ 0);
             }
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -1400,6 +1517,7 @@ pub const Field = struct {
             .ptr_words = 4,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const ordinal = struct {
@@ -1435,9 +1553,7 @@ pub const Field = struct {
             }
 
             pub fn implicit(self: @This()) ?void {
-                if (self.reader.readIntField(u16, 5) != 0) {
-                    return null;
-                }
+                if (self.reader.readIntField(u16, 5) != 0) { return null; }
                 return self.reader.readVoid();
             }
 
@@ -1446,11 +1562,10 @@ pub const Field = struct {
             /// The ordinal is given here mainly just so that the original schema text can be reproduced given
             /// the compiled version -- i.e. so that `capnp compile -ocapnp` can do its job.
             pub fn explicit(self: @This()) ?u16 {
-                if (self.reader.readIntField(u16, 5) != 1) {
-                    return null;
-                }
+                if (self.reader.readIntField(u16, 5) != 1) { return null; }
                 return self.reader.readIntField(u16, 6) ^ 0;
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -1468,14 +1583,20 @@ pub const Field = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Field.ordinal.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Field.ordinal.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn which(self: @This()) _Root.Field.ordinal.Tag {
                 return @fromBackingInt(@intCast(self.builder.readIntField(u16, 5)));
             }
 
             pub fn implicit(self: @This()) ?void {
-                if (self.builder.readIntField(u16, 5) != 0) {
-                    return null;
-                }
+                if (self.builder.readIntField(u16, 5) != 0) { return null; }
                 return self.builder.readVoid();
             }
 
@@ -1489,9 +1610,7 @@ pub const Field = struct {
             /// The ordinal is given here mainly just so that the original schema text can be reproduced given
             /// the compiled version -- i.e. so that `capnp compile -ocapnp` can do its job.
             pub fn explicit(self: @This()) ?u16 {
-                if (self.builder.readIntField(u16, 5) != 1) {
-                    return null;
-                }
+                if (self.builder.readIntField(u16, 5) != 1) { return null; }
                 return self.builder.readIntField(u16, 6) ^ 0;
             }
 
@@ -1499,6 +1618,7 @@ pub const Field = struct {
                 self.builder.writeIntField(u16, 5, 1);
                 self.builder.writeIntField(u16, 6, v ^ 0);
             }
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -1506,6 +1626,7 @@ pub const Field = struct {
             .ptr_words = 4,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const noDiscriminant: u16 = 65535;
@@ -1554,23 +1675,20 @@ pub const Field = struct {
 
         /// A regular, non-group, non-fixed-list field.
         pub fn slot(self: @This()) ?_Root.Field.slot.Reader {
-            if (self.reader.readIntField(u16, 4) != 0) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 4) != 0) { return null; }
             return .{ .reader = self.reader };
         }
 
         /// A group.
         pub fn group(self: @This()) ?_Root.Field.group.Reader {
-            if (self.reader.readIntField(u16, 4) != 1) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 4) != 1) { return null; }
             return .{ .reader = self.reader };
         }
 
         pub fn ordinal(self: @This()) _Root.Field.ordinal.Reader {
             return .{ .reader = self.reader };
         }
+
     };
 
     pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -1586,6 +1704,14 @@ pub const Field = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.Field.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Field.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         pub fn which(self: @This()) _Root.Field.Tag {
@@ -1622,6 +1748,7 @@ pub const Field = struct {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 1);
         }
 
+
         /// If the field is in a union, this is the value which the union's discriminant should take when
         /// the field is active.  If the field is not in a union, this is 0xffff.
         pub fn discriminantValue(self: @This()) u16 {
@@ -1634,9 +1761,7 @@ pub const Field = struct {
 
         /// A regular, non-group, non-fixed-list field.
         pub fn slot(self: @This()) ?_Root.Field.slot.Builder {
-            if (self.builder.readIntField(u16, 4) != 0) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 4) != 0) { return null; }
             return .{ .builder = self.builder };
         }
 
@@ -1647,9 +1772,7 @@ pub const Field = struct {
 
         /// A group.
         pub fn group(self: @This()) ?_Root.Field.group.Builder {
-            if (self.builder.readIntField(u16, 4) != 1) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 4) != 1) { return null; }
             return .{ .builder = self.builder };
         }
 
@@ -1661,6 +1784,9 @@ pub const Field = struct {
         pub fn ordinal(self: @This()) _Root.Field.ordinal.Builder {
             return .{ .builder = self.builder };
         }
+
+
+
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -1668,6 +1794,7 @@ pub const Field = struct {
         .ptr_words = 4,
         .builder = @This().Builder.fromStructBuilder,
     };
+
 };
 
 /// Schema for member of an enum.
@@ -1702,6 +1829,7 @@ pub const Enumerant = struct {
         pub fn annotations(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Annotation.Reader, _Root.Annotation.reader_trait) {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Annotation.Reader, _Root.Annotation.reader_trait), 1);
         }
+
     };
 
     pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -1717,6 +1845,14 @@ pub const Enumerant = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.Enumerant.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Enumerant.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         pub fn name(self: @This()) capnp.BuildError![:0]const u8 {
@@ -1744,6 +1880,8 @@ pub const Enumerant = struct {
         pub fn setAnnotations(self: @This()) capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 1);
         }
+
+
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -1751,6 +1889,7 @@ pub const Enumerant = struct {
         .ptr_words = 2,
         .builder = @This().Builder.fromStructBuilder,
     };
+
 };
 
 pub const Superclass = struct {
@@ -1778,6 +1917,7 @@ pub const Superclass = struct {
         pub fn brand(self: @This()) capnp.Error!_Root.Brand.Reader {
             return try self.reader.readPtrField(_Root.Brand.Reader, 0);
         }
+
     };
 
     pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -1795,6 +1935,14 @@ pub const Superclass = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.Superclass.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Superclass.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         pub fn id(self: @This()) u64 {
             return self.builder.readIntField(u64, 0) ^ 0;
         }
@@ -1810,6 +1958,8 @@ pub const Superclass = struct {
         pub fn setBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
             return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 0);
         }
+
+
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -1817,6 +1967,7 @@ pub const Superclass = struct {
         .ptr_words = 1,
         .builder = @This().Builder.fromStructBuilder,
     };
+
 };
 
 /// Schema for method of an interface.
@@ -1883,6 +2034,7 @@ pub const Method = struct {
         pub fn implicitParameters(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Node.Parameter.Reader, _Root.Node.Parameter.reader_trait) {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Node.Parameter.Reader, _Root.Node.Parameter.reader_trait), 4);
         }
+
     };
 
     pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -1898,6 +2050,14 @@ pub const Method = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.Method.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Method.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         pub fn name(self: @This()) capnp.BuildError![:0]const u8 {
@@ -1950,6 +2110,7 @@ pub const Method = struct {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Annotation.Builder, _Root.Annotation.builder_trait), 1);
         }
 
+
         /// Brand of param struct type.
         pub fn paramBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
             return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 2);
@@ -1958,6 +2119,7 @@ pub const Method = struct {
         pub fn setParamBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
             return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 2);
         }
+
 
         /// Brand of result struct type.
         pub fn resultBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
@@ -1968,6 +2130,7 @@ pub const Method = struct {
             return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 3);
         }
 
+
         /// The parameters listed in [] (typically, type / generic parameters), whose bindings are intended
         /// to be inferred rather than specified explicitly, although not all languages support this.
         pub fn implicitParameters(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait) {
@@ -1977,6 +2140,8 @@ pub const Method = struct {
         pub fn setImplicitParameters(self: @This()) capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.Parameter.Builder, _Root.Node.Parameter.builder_trait), 4);
         }
+
+
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -1984,6 +2149,7 @@ pub const Method = struct {
         .ptr_words = 5,
         .builder = @This().Builder.fromStructBuilder,
     };
+
 };
 
 /// Represents a type expression.
@@ -1991,8 +2157,8 @@ pub const Type = struct {
     pub const id: u64 = 0xd07378ede1f9cc60;
 
     pub const Tag = enum(u16) {
-        void = 0,
-        bool = 1,
+        @"void" = 0,
+        @"bool" = 1,
         int8 = 2,
         int16 = 3,
         int32 = 4,
@@ -2034,6 +2200,7 @@ pub const Type = struct {
             pub fn elementType(self: @This()) capnp.Error!_Root.Type.Reader {
                 return try self.reader.readPtrField(_Root.Type.Reader, 0);
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -2051,6 +2218,14 @@ pub const Type = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Type.list.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Type.list.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn elementType(self: @This()) capnp.BuildError!_Root.Type.Builder {
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 0);
             }
@@ -2058,6 +2233,8 @@ pub const Type = struct {
             pub fn setElementType(self: @This()) capnp.BuildError!_Root.Type.Builder {
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 0);
             }
+
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -2065,6 +2242,7 @@ pub const Type = struct {
             .ptr_words = 1,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const @"enum" = struct {
@@ -2092,6 +2270,7 @@ pub const Type = struct {
             pub fn brand(self: @This()) capnp.Error!_Root.Brand.Reader {
                 return try self.reader.readPtrField(_Root.Brand.Reader, 0);
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -2109,6 +2288,14 @@ pub const Type = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Type.@"enum".Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Type.@"enum".Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn typeId(self: @This()) u64 {
                 return self.builder.readIntField(u64, 1) ^ 0;
             }
@@ -2124,6 +2311,8 @@ pub const Type = struct {
             pub fn setBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
                 return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 0);
             }
+
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -2131,6 +2320,7 @@ pub const Type = struct {
             .ptr_words = 1,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const @"struct" = struct {
@@ -2158,6 +2348,7 @@ pub const Type = struct {
             pub fn brand(self: @This()) capnp.Error!_Root.Brand.Reader {
                 return try self.reader.readPtrField(_Root.Brand.Reader, 0);
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -2175,6 +2366,14 @@ pub const Type = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Type.@"struct".Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Type.@"struct".Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn typeId(self: @This()) u64 {
                 return self.builder.readIntField(u64, 1) ^ 0;
             }
@@ -2190,6 +2389,8 @@ pub const Type = struct {
             pub fn setBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
                 return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 0);
             }
+
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -2197,6 +2398,7 @@ pub const Type = struct {
             .ptr_words = 1,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const interface = struct {
@@ -2224,6 +2426,7 @@ pub const Type = struct {
             pub fn brand(self: @This()) capnp.Error!_Root.Brand.Reader {
                 return try self.reader.readPtrField(_Root.Brand.Reader, 0);
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -2241,6 +2444,14 @@ pub const Type = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Type.interface.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Type.interface.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn typeId(self: @This()) u64 {
                 return self.builder.readIntField(u64, 1) ^ 0;
             }
@@ -2256,6 +2467,8 @@ pub const Type = struct {
             pub fn setBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
                 return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 0);
             }
+
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -2263,6 +2476,7 @@ pub const Type = struct {
             .ptr_words = 1,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const anyPointer = struct {
@@ -2324,35 +2538,28 @@ pub const Type = struct {
 
                 /// truly AnyPointer
                 pub fn anyKind(self: @This()) ?void {
-                    if (self.reader.readIntField(u16, 5) != 0) {
-                        return null;
-                    }
+                    if (self.reader.readIntField(u16, 5) != 0) { return null; }
                     return self.reader.readVoid();
                 }
 
                 /// AnyStruct
                 pub fn @"struct"(self: @This()) ?void {
-                    if (self.reader.readIntField(u16, 5) != 1) {
-                        return null;
-                    }
+                    if (self.reader.readIntField(u16, 5) != 1) { return null; }
                     return self.reader.readVoid();
                 }
 
                 /// AnyList
                 pub fn list(self: @This()) ?void {
-                    if (self.reader.readIntField(u16, 5) != 2) {
-                        return null;
-                    }
+                    if (self.reader.readIntField(u16, 5) != 2) { return null; }
                     return self.reader.readVoid();
                 }
 
                 /// Capability
                 pub fn capability(self: @This()) ?void {
-                    if (self.reader.readIntField(u16, 5) != 3) {
-                        return null;
-                    }
+                    if (self.reader.readIntField(u16, 5) != 3) { return null; }
                     return self.reader.readVoid();
                 }
+
             };
 
             pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -2370,15 +2577,21 @@ pub const Type = struct {
                     return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
                 }
 
+                pub fn asReader(self: @This()) _Root.Type.anyPointer.unconstrained.Reader {
+                    return .{ .reader = self.builder.asReader() };
+                }
+
+                pub fn copyFrom(self: @This(), source: _Root.Type.anyPointer.unconstrained.Reader) void {
+                    self.builder.copyContentFrom(source.reader) catch unreachable;
+                }
+
                 pub fn which(self: @This()) _Root.Type.anyPointer.unconstrained.Tag {
                     return @fromBackingInt(@intCast(self.builder.readIntField(u16, 5)));
                 }
 
                 /// truly AnyPointer
                 pub fn anyKind(self: @This()) ?void {
-                    if (self.builder.readIntField(u16, 5) != 0) {
-                        return null;
-                    }
+                    if (self.builder.readIntField(u16, 5) != 0) { return null; }
                     return self.builder.readVoid();
                 }
 
@@ -2389,9 +2602,7 @@ pub const Type = struct {
 
                 /// AnyStruct
                 pub fn @"struct"(self: @This()) ?void {
-                    if (self.builder.readIntField(u16, 5) != 1) {
-                        return null;
-                    }
+                    if (self.builder.readIntField(u16, 5) != 1) { return null; }
                     return self.builder.readVoid();
                 }
 
@@ -2402,9 +2613,7 @@ pub const Type = struct {
 
                 /// AnyList
                 pub fn list(self: @This()) ?void {
-                    if (self.builder.readIntField(u16, 5) != 2) {
-                        return null;
-                    }
+                    if (self.builder.readIntField(u16, 5) != 2) { return null; }
                     return self.builder.readVoid();
                 }
 
@@ -2415,9 +2624,7 @@ pub const Type = struct {
 
                 /// Capability
                 pub fn capability(self: @This()) ?void {
-                    if (self.builder.readIntField(u16, 5) != 3) {
-                        return null;
-                    }
+                    if (self.builder.readIntField(u16, 5) != 3) { return null; }
                     return self.builder.readVoid();
                 }
 
@@ -2425,6 +2632,7 @@ pub const Type = struct {
                     self.builder.writeIntField(u16, 5, 3);
                     return;
                 }
+
             };
 
             pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -2432,6 +2640,7 @@ pub const Type = struct {
                 .ptr_words = 1,
                 .builder = @This().Builder.fromStructBuilder,
             };
+
         };
 
         /// This is actually a reference to a type parameter defined within this scope.
@@ -2463,6 +2672,7 @@ pub const Type = struct {
                 pub fn parameterIndex(self: @This()) u16 {
                     return self.reader.readIntField(u16, 5) ^ 0;
                 }
+
             };
 
             pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -2478,6 +2688,14 @@ pub const Type = struct {
 
                 pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
                     return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+                }
+
+                pub fn asReader(self: @This()) _Root.Type.anyPointer.parameter.Reader {
+                    return .{ .reader = self.builder.asReader() };
+                }
+
+                pub fn copyFrom(self: @This(), source: _Root.Type.anyPointer.parameter.Reader) void {
+                    self.builder.copyContentFrom(source.reader) catch unreachable;
                 }
 
                 /// ID of the generic type whose parameter we're referencing. This is always either the
@@ -2498,6 +2716,7 @@ pub const Type = struct {
                 pub fn setParameterIndex(self: @This(), v: u16) void {
                     self.builder.writeIntField(u16, 5, v ^ 0);
                 }
+
             };
 
             pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -2505,6 +2724,7 @@ pub const Type = struct {
                 .ptr_words = 1,
                 .builder = @This().Builder.fromStructBuilder,
             };
+
         };
 
         /// This is actually a reference to an implicit (generic) parameter of a method. The only
@@ -2530,6 +2750,7 @@ pub const Type = struct {
                 pub fn parameterIndex(self: @This()) u16 {
                     return self.reader.readIntField(u16, 5) ^ 0;
                 }
+
             };
 
             pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -2547,6 +2768,14 @@ pub const Type = struct {
                     return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
                 }
 
+                pub fn asReader(self: @This()) _Root.Type.anyPointer.implicitMethodParameter.Reader {
+                    return .{ .reader = self.builder.asReader() };
+                }
+
+                pub fn copyFrom(self: @This(), source: _Root.Type.anyPointer.implicitMethodParameter.Reader) void {
+                    self.builder.copyContentFrom(source.reader) catch unreachable;
+                }
+
                 pub fn parameterIndex(self: @This()) u16 {
                     return self.builder.readIntField(u16, 5) ^ 0;
                 }
@@ -2554,6 +2783,7 @@ pub const Type = struct {
                 pub fn setParameterIndex(self: @This(), v: u16) void {
                     self.builder.writeIntField(u16, 5, v ^ 0);
                 }
+
             };
 
             pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -2561,6 +2791,7 @@ pub const Type = struct {
                 .ptr_words = 1,
                 .builder = @This().Builder.fromStructBuilder,
             };
+
         };
 
         pub const Reader = struct {
@@ -2588,28 +2819,23 @@ pub const Type = struct {
             /// In retrospect this name is probably a poor choice given that it may still be constrained
             /// to be a struct, list, or capability.
             pub fn unconstrained(self: @This()) ?_Root.Type.anyPointer.unconstrained.Reader {
-                if (self.reader.readIntField(u16, 4) != 0) {
-                    return null;
-                }
+                if (self.reader.readIntField(u16, 4) != 0) { return null; }
                 return .{ .reader = self.reader };
             }
 
             /// This is actually a reference to a type parameter defined within this scope.
             pub fn parameter(self: @This()) ?_Root.Type.anyPointer.parameter.Reader {
-                if (self.reader.readIntField(u16, 4) != 1) {
-                    return null;
-                }
+                if (self.reader.readIntField(u16, 4) != 1) { return null; }
                 return .{ .reader = self.reader };
             }
 
             /// This is actually a reference to an implicit (generic) parameter of a method. The only
             /// legal context for this type to appear is inside Method.paramBrand or Method.resultBrand.
             pub fn implicitMethodParameter(self: @This()) ?_Root.Type.anyPointer.implicitMethodParameter.Reader {
-                if (self.reader.readIntField(u16, 4) != 2) {
-                    return null;
-                }
+                if (self.reader.readIntField(u16, 4) != 2) { return null; }
                 return .{ .reader = self.reader };
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -2627,6 +2853,14 @@ pub const Type = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Type.anyPointer.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Type.anyPointer.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn which(self: @This()) _Root.Type.anyPointer.Tag {
                 return @fromBackingInt(@intCast(self.builder.readIntField(u16, 4)));
             }
@@ -2637,9 +2871,7 @@ pub const Type = struct {
             /// In retrospect this name is probably a poor choice given that it may still be constrained
             /// to be a struct, list, or capability.
             pub fn unconstrained(self: @This()) ?_Root.Type.anyPointer.unconstrained.Builder {
-                if (self.builder.readIntField(u16, 4) != 0) {
-                    return null;
-                }
+                if (self.builder.readIntField(u16, 4) != 0) { return null; }
                 return .{ .builder = self.builder };
             }
 
@@ -2650,9 +2882,7 @@ pub const Type = struct {
 
             /// This is actually a reference to a type parameter defined within this scope.
             pub fn parameter(self: @This()) ?_Root.Type.anyPointer.parameter.Builder {
-                if (self.builder.readIntField(u16, 4) != 1) {
-                    return null;
-                }
+                if (self.builder.readIntField(u16, 4) != 1) { return null; }
                 return .{ .builder = self.builder };
             }
 
@@ -2664,9 +2894,7 @@ pub const Type = struct {
             /// This is actually a reference to an implicit (generic) parameter of a method. The only
             /// legal context for this type to appear is inside Method.paramBrand or Method.resultBrand.
             pub fn implicitMethodParameter(self: @This()) ?_Root.Type.anyPointer.implicitMethodParameter.Builder {
-                if (self.builder.readIntField(u16, 4) != 2) {
-                    return null;
-                }
+                if (self.builder.readIntField(u16, 4) != 2) { return null; }
                 return .{ .builder = self.builder };
             }
 
@@ -2674,6 +2902,7 @@ pub const Type = struct {
                 self.builder.writeIntField(u16, 4, 2);
                 return .{ .builder = self.builder };
             }
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -2681,6 +2910,7 @@ pub const Type = struct {
             .ptr_words = 1,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const Reader = struct {
@@ -2703,137 +2933,100 @@ pub const Type = struct {
         }
 
         pub fn @"void"(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 0) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 0) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn @"bool"(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 1) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 1) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn int8(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 2) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 2) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn int16(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 3) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 3) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn int32(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 4) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 4) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn int64(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 5) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 5) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn uint8(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 6) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 6) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn uint16(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 7) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 7) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn uint32(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 8) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 8) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn uint64(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 9) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 9) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn float32(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 10) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 10) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn float64(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 11) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 11) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn text(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 12) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 12) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn data(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 13) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 13) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn list(self: @This()) ?_Root.Type.list.Reader {
-            if (self.reader.readIntField(u16, 0) != 14) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 14) { return null; }
             return .{ .reader = self.reader };
         }
 
         pub fn @"enum"(self: @This()) ?_Root.Type.@"enum".Reader {
-            if (self.reader.readIntField(u16, 0) != 15) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 15) { return null; }
             return .{ .reader = self.reader };
         }
 
         pub fn @"struct"(self: @This()) ?_Root.Type.@"struct".Reader {
-            if (self.reader.readIntField(u16, 0) != 16) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 16) { return null; }
             return .{ .reader = self.reader };
         }
 
         pub fn interface(self: @This()) ?_Root.Type.interface.Reader {
-            if (self.reader.readIntField(u16, 0) != 17) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 17) { return null; }
             return .{ .reader = self.reader };
         }
 
         pub fn anyPointer(self: @This()) ?_Root.Type.anyPointer.Reader {
-            if (self.reader.readIntField(u16, 0) != 18) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 18) { return null; }
             return .{ .reader = self.reader };
         }
+
     };
 
     pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -2851,14 +3044,20 @@ pub const Type = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.Type.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Type.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         pub fn which(self: @This()) _Root.Type.Tag {
             return @fromBackingInt(@intCast(self.builder.readIntField(u16, 0)));
         }
 
         pub fn @"void"(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 0) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 0) { return null; }
             return self.builder.readVoid();
         }
 
@@ -2868,9 +3067,7 @@ pub const Type = struct {
         }
 
         pub fn @"bool"(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 1) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 1) { return null; }
             return self.builder.readVoid();
         }
 
@@ -2880,9 +3077,7 @@ pub const Type = struct {
         }
 
         pub fn int8(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 2) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 2) { return null; }
             return self.builder.readVoid();
         }
 
@@ -2892,9 +3087,7 @@ pub const Type = struct {
         }
 
         pub fn int16(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 3) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 3) { return null; }
             return self.builder.readVoid();
         }
 
@@ -2904,9 +3097,7 @@ pub const Type = struct {
         }
 
         pub fn int32(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 4) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 4) { return null; }
             return self.builder.readVoid();
         }
 
@@ -2916,9 +3107,7 @@ pub const Type = struct {
         }
 
         pub fn int64(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 5) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 5) { return null; }
             return self.builder.readVoid();
         }
 
@@ -2928,9 +3117,7 @@ pub const Type = struct {
         }
 
         pub fn uint8(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 6) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 6) { return null; }
             return self.builder.readVoid();
         }
 
@@ -2940,9 +3127,7 @@ pub const Type = struct {
         }
 
         pub fn uint16(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 7) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 7) { return null; }
             return self.builder.readVoid();
         }
 
@@ -2952,9 +3137,7 @@ pub const Type = struct {
         }
 
         pub fn uint32(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 8) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 8) { return null; }
             return self.builder.readVoid();
         }
 
@@ -2964,9 +3147,7 @@ pub const Type = struct {
         }
 
         pub fn uint64(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 9) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 9) { return null; }
             return self.builder.readVoid();
         }
 
@@ -2976,9 +3157,7 @@ pub const Type = struct {
         }
 
         pub fn float32(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 10) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 10) { return null; }
             return self.builder.readVoid();
         }
 
@@ -2988,9 +3167,7 @@ pub const Type = struct {
         }
 
         pub fn float64(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 11) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 11) { return null; }
             return self.builder.readVoid();
         }
 
@@ -3000,9 +3177,7 @@ pub const Type = struct {
         }
 
         pub fn text(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 12) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 12) { return null; }
             return self.builder.readVoid();
         }
 
@@ -3012,9 +3187,7 @@ pub const Type = struct {
         }
 
         pub fn data(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 13) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 13) { return null; }
             return self.builder.readVoid();
         }
 
@@ -3024,9 +3197,7 @@ pub const Type = struct {
         }
 
         pub fn list(self: @This()) ?_Root.Type.list.Builder {
-            if (self.builder.readIntField(u16, 0) != 14) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 14) { return null; }
             return .{ .builder = self.builder };
         }
 
@@ -3036,9 +3207,7 @@ pub const Type = struct {
         }
 
         pub fn @"enum"(self: @This()) ?_Root.Type.@"enum".Builder {
-            if (self.builder.readIntField(u16, 0) != 15) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 15) { return null; }
             return .{ .builder = self.builder };
         }
 
@@ -3048,9 +3217,7 @@ pub const Type = struct {
         }
 
         pub fn @"struct"(self: @This()) ?_Root.Type.@"struct".Builder {
-            if (self.builder.readIntField(u16, 0) != 16) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 16) { return null; }
             return .{ .builder = self.builder };
         }
 
@@ -3060,9 +3227,7 @@ pub const Type = struct {
         }
 
         pub fn interface(self: @This()) ?_Root.Type.interface.Builder {
-            if (self.builder.readIntField(u16, 0) != 17) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 17) { return null; }
             return .{ .builder = self.builder };
         }
 
@@ -3072,9 +3237,7 @@ pub const Type = struct {
         }
 
         pub fn anyPointer(self: @This()) ?_Root.Type.anyPointer.Builder {
-            if (self.builder.readIntField(u16, 0) != 18) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 18) { return null; }
             return .{ .builder = self.builder };
         }
 
@@ -3082,6 +3245,7 @@ pub const Type = struct {
             self.builder.writeIntField(u16, 0, 18);
             return .{ .builder = self.builder };
         }
+
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -3089,6 +3253,7 @@ pub const Type = struct {
         .ptr_words = 1,
         .builder = @This().Builder.fromStructBuilder,
     };
+
 };
 
 /// Specifies bindings for parameters of generics. Since these bindings turn a generic into a
@@ -3147,9 +3312,7 @@ pub const Brand = struct {
 
             /// List of parameter bindings.
             pub fn bind(self: @This()) capnp.Error!?capnp.CompositeListReader(_Root.Brand.Binding.Reader, _Root.Brand.Binding.reader_trait) {
-                if (self.reader.readIntField(u16, 4) != 0) {
-                    return null;
-                }
+                if (self.reader.readIntField(u16, 4) != 0) { return null; }
                 return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Brand.Binding.Reader, _Root.Brand.Binding.reader_trait), 0);
             }
 
@@ -3169,11 +3332,10 @@ pub const Brand = struct {
             /// The innerInherit and innerBindSelf fields have equivalent types, but different Brand
             /// styles.
             pub fn inherit(self: @This()) ?void {
-                if (self.reader.readIntField(u16, 4) != 1) {
-                    return null;
-                }
+                if (self.reader.readIntField(u16, 4) != 1) { return null; }
                 return self.reader.readVoid();
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -3191,6 +3353,14 @@ pub const Brand = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Brand.Scope.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Brand.Scope.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn which(self: @This()) _Root.Brand.Scope.Tag {
                 return @fromBackingInt(@intCast(self.builder.readIntField(u16, 4)));
             }
@@ -3206,9 +3376,7 @@ pub const Brand = struct {
 
             /// List of parameter bindings.
             pub fn bind(self: @This()) capnp.BuildError!?capnp.CompositeListBuilder(_Root.Brand.Binding.Builder, _Root.Brand.Binding.builder_trait) {
-                if (self.builder.readIntField(u16, 4) != 0) {
-                    return null;
-                }
+                if (self.builder.readIntField(u16, 4) != 0) { return null; }
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Brand.Binding.Builder, _Root.Brand.Binding.builder_trait), 0);
             }
 
@@ -3216,6 +3384,7 @@ pub const Brand = struct {
                 self.builder.writeIntField(u16, 4, 0);
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Brand.Binding.Builder, _Root.Brand.Binding.builder_trait), 0);
             }
+
 
             /// The place where the Brand appears is within this scope or a sub-scope, and bindings
             /// for this scope are deferred to later Brand applications. This is equivalent to a
@@ -3233,9 +3402,7 @@ pub const Brand = struct {
             /// The innerInherit and innerBindSelf fields have equivalent types, but different Brand
             /// styles.
             pub fn inherit(self: @This()) ?void {
-                if (self.builder.readIntField(u16, 4) != 1) {
-                    return null;
-                }
+                if (self.builder.readIntField(u16, 4) != 1) { return null; }
                 return self.builder.readVoid();
             }
 
@@ -3243,6 +3410,7 @@ pub const Brand = struct {
                 self.builder.writeIntField(u16, 4, 1);
                 return;
             }
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -3250,6 +3418,7 @@ pub const Brand = struct {
             .ptr_words = 1,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const Binding = struct {
@@ -3257,7 +3426,7 @@ pub const Brand = struct {
 
         pub const Tag = enum(u16) {
             unbound = 0,
-            type = 1,
+            @"type" = 1,
             _,
         };
 
@@ -3281,18 +3450,15 @@ pub const Brand = struct {
             }
 
             pub fn unbound(self: @This()) ?void {
-                if (self.reader.readIntField(u16, 0) != 0) {
-                    return null;
-                }
+                if (self.reader.readIntField(u16, 0) != 0) { return null; }
                 return self.reader.readVoid();
             }
 
             pub fn @"type"(self: @This()) capnp.Error!?_Root.Type.Reader {
-                if (self.reader.readIntField(u16, 0) != 1) {
-                    return null;
-                }
+                if (self.reader.readIntField(u16, 0) != 1) { return null; }
                 return try self.reader.readPtrField(_Root.Type.Reader, 0);
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -3310,14 +3476,20 @@ pub const Brand = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Brand.Binding.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Brand.Binding.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn which(self: @This()) _Root.Brand.Binding.Tag {
                 return @fromBackingInt(@intCast(self.builder.readIntField(u16, 0)));
             }
 
             pub fn unbound(self: @This()) ?void {
-                if (self.builder.readIntField(u16, 0) != 0) {
-                    return null;
-                }
+                if (self.builder.readIntField(u16, 0) != 0) { return null; }
                 return self.builder.readVoid();
             }
 
@@ -3327,9 +3499,7 @@ pub const Brand = struct {
             }
 
             pub fn @"type"(self: @This()) capnp.BuildError!?_Root.Type.Builder {
-                if (self.builder.readIntField(u16, 0) != 1) {
-                    return null;
-                }
+                if (self.builder.readIntField(u16, 0) != 1) { return null; }
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 0);
             }
 
@@ -3337,6 +3507,8 @@ pub const Brand = struct {
                 self.builder.writeIntField(u16, 0, 1);
                 return try self.builder.buildStructField(_Root.Type.Builder, _Root.Type.builder_trait, 0);
             }
+
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -3344,6 +3516,7 @@ pub const Brand = struct {
             .ptr_words = 1,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const Reader = struct {
@@ -3367,6 +3540,7 @@ pub const Brand = struct {
         pub fn scopes(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Brand.Scope.Reader, _Root.Brand.Scope.reader_trait) {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Brand.Scope.Reader, _Root.Brand.Scope.reader_trait), 0);
         }
+
     };
 
     pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -3384,6 +3558,14 @@ pub const Brand = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.Brand.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Brand.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         /// For each of the target type and each of its parent scopes, a parameterization may be included
         /// in this list. If no parameterization is included for a particular relevant scope, then either
         /// that scope has no parameters or all parameters should be considered to be `AnyPointer`.
@@ -3394,6 +3576,8 @@ pub const Brand = struct {
         pub fn setScopes(self: @This()) capnp.CompositeListBuilder(_Root.Brand.Scope.Builder, _Root.Brand.Scope.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Brand.Scope.Builder, _Root.Brand.Scope.builder_trait), 0);
         }
+
+
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -3401,6 +3585,7 @@ pub const Brand = struct {
         .ptr_words = 1,
         .builder = @This().Builder.fromStructBuilder,
     };
+
 };
 
 /// Represents a value, e.g. a field default value, constant value, or annotation value.
@@ -3408,8 +3593,8 @@ pub const Value = struct {
     pub const id: u64 = 0xce23dcd2d7b00c9b;
 
     pub const Tag = enum(u16) {
-        void = 0,
-        bool = 1,
+        @"void" = 0,
+        @"bool" = 1,
         int8 = 2,
         int16 = 3,
         int32 = 4,
@@ -3452,139 +3637,102 @@ pub const Value = struct {
         }
 
         pub fn @"void"(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 0) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 0) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn @"bool"(self: @This()) ?bool {
-            if (self.reader.readIntField(u16, 0) != 1) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 1) { return null; }
             return self.reader.readBoolField(16) != false;
         }
 
         pub fn int8(self: @This()) ?i8 {
-            if (self.reader.readIntField(u16, 0) != 2) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 2) { return null; }
             return self.reader.readIntField(i8, 2) ^ 0;
         }
 
         pub fn int16(self: @This()) ?i16 {
-            if (self.reader.readIntField(u16, 0) != 3) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 3) { return null; }
             return self.reader.readIntField(i16, 1) ^ 0;
         }
 
         pub fn int32(self: @This()) ?i32 {
-            if (self.reader.readIntField(u16, 0) != 4) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 4) { return null; }
             return self.reader.readIntField(i32, 1) ^ 0;
         }
 
         pub fn int64(self: @This()) ?i64 {
-            if (self.reader.readIntField(u16, 0) != 5) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 5) { return null; }
             return self.reader.readIntField(i64, 1) ^ 0;
         }
 
         pub fn uint8(self: @This()) ?u8 {
-            if (self.reader.readIntField(u16, 0) != 6) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 6) { return null; }
             return self.reader.readIntField(u8, 2) ^ 0;
         }
 
         pub fn uint16(self: @This()) ?u16 {
-            if (self.reader.readIntField(u16, 0) != 7) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 7) { return null; }
             return self.reader.readIntField(u16, 1) ^ 0;
         }
 
         pub fn uint32(self: @This()) ?u32 {
-            if (self.reader.readIntField(u16, 0) != 8) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 8) { return null; }
             return self.reader.readIntField(u32, 1) ^ 0;
         }
 
         pub fn uint64(self: @This()) ?u64 {
-            if (self.reader.readIntField(u16, 0) != 9) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 9) { return null; }
             return self.reader.readIntField(u64, 1) ^ 0;
         }
 
         pub fn float32(self: @This()) ?f32 {
-            if (self.reader.readIntField(u16, 0) != 10) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 10) { return null; }
             return @bitCast(self.reader.readIntField(u32, 1) ^ 0);
         }
 
         pub fn float64(self: @This()) ?f64 {
-            if (self.reader.readIntField(u16, 0) != 11) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 11) { return null; }
             return @bitCast(self.reader.readIntField(u64, 1) ^ 0);
         }
 
         pub fn text(self: @This()) capnp.Error!?[:0]const u8 {
-            if (self.reader.readIntField(u16, 0) != 12) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 12) { return null; }
             return try self.reader.readStringField(0);
         }
 
         pub fn data(self: @This()) capnp.Error!?[]const u8 {
-            if (self.reader.readIntField(u16, 0) != 13) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 13) { return null; }
             return try self.reader.readDataField(0);
         }
 
         pub fn list(self: @This()) capnp.Error!?capnp.AnyPointerReader {
-            if (self.reader.readIntField(u16, 0) != 14) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 14) { return null; }
             return try self.reader.readPtrField(capnp.AnyPointerReader, 0);
         }
 
         pub fn @"enum"(self: @This()) ?u16 {
-            if (self.reader.readIntField(u16, 0) != 15) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 15) { return null; }
             return self.reader.readIntField(u16, 1) ^ 0;
         }
 
         pub fn @"struct"(self: @This()) capnp.Error!?capnp.AnyPointerReader {
-            if (self.reader.readIntField(u16, 0) != 16) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 16) { return null; }
             return try self.reader.readPtrField(capnp.AnyPointerReader, 0);
         }
 
         /// The only interface value that can be represented statically is "null", whose methods always
         /// throw exceptions.
         pub fn interface(self: @This()) ?void {
-            if (self.reader.readIntField(u16, 0) != 17) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 17) { return null; }
             return self.reader.readVoid();
         }
 
         pub fn anyPointer(self: @This()) capnp.Error!?capnp.AnyPointerReader {
-            if (self.reader.readIntField(u16, 0) != 18) {
-                return null;
-            }
+            if (self.reader.readIntField(u16, 0) != 18) { return null; }
             return try self.reader.readPtrField(capnp.AnyPointerReader, 0);
         }
+
     };
 
     pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -3602,14 +3750,20 @@ pub const Value = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.Value.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Value.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         pub fn which(self: @This()) _Root.Value.Tag {
             return @fromBackingInt(@intCast(self.builder.readIntField(u16, 0)));
         }
 
         pub fn @"void"(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 0) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 0) { return null; }
             return self.builder.readVoid();
         }
 
@@ -3619,9 +3773,7 @@ pub const Value = struct {
         }
 
         pub fn @"bool"(self: @This()) ?bool {
-            if (self.builder.readIntField(u16, 0) != 1) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 1) { return null; }
             return self.builder.readBoolField(16) != false;
         }
 
@@ -3631,9 +3783,7 @@ pub const Value = struct {
         }
 
         pub fn int8(self: @This()) ?i8 {
-            if (self.builder.readIntField(u16, 0) != 2) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 2) { return null; }
             return self.builder.readIntField(i8, 2) ^ 0;
         }
 
@@ -3643,9 +3793,7 @@ pub const Value = struct {
         }
 
         pub fn int16(self: @This()) ?i16 {
-            if (self.builder.readIntField(u16, 0) != 3) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 3) { return null; }
             return self.builder.readIntField(i16, 1) ^ 0;
         }
 
@@ -3655,9 +3803,7 @@ pub const Value = struct {
         }
 
         pub fn int32(self: @This()) ?i32 {
-            if (self.builder.readIntField(u16, 0) != 4) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 4) { return null; }
             return self.builder.readIntField(i32, 1) ^ 0;
         }
 
@@ -3667,9 +3813,7 @@ pub const Value = struct {
         }
 
         pub fn int64(self: @This()) ?i64 {
-            if (self.builder.readIntField(u16, 0) != 5) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 5) { return null; }
             return self.builder.readIntField(i64, 1) ^ 0;
         }
 
@@ -3679,9 +3823,7 @@ pub const Value = struct {
         }
 
         pub fn uint8(self: @This()) ?u8 {
-            if (self.builder.readIntField(u16, 0) != 6) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 6) { return null; }
             return self.builder.readIntField(u8, 2) ^ 0;
         }
 
@@ -3691,9 +3833,7 @@ pub const Value = struct {
         }
 
         pub fn uint16(self: @This()) ?u16 {
-            if (self.builder.readIntField(u16, 0) != 7) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 7) { return null; }
             return self.builder.readIntField(u16, 1) ^ 0;
         }
 
@@ -3703,9 +3843,7 @@ pub const Value = struct {
         }
 
         pub fn uint32(self: @This()) ?u32 {
-            if (self.builder.readIntField(u16, 0) != 8) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 8) { return null; }
             return self.builder.readIntField(u32, 1) ^ 0;
         }
 
@@ -3715,9 +3853,7 @@ pub const Value = struct {
         }
 
         pub fn uint64(self: @This()) ?u64 {
-            if (self.builder.readIntField(u16, 0) != 9) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 9) { return null; }
             return self.builder.readIntField(u64, 1) ^ 0;
         }
 
@@ -3727,9 +3863,7 @@ pub const Value = struct {
         }
 
         pub fn float32(self: @This()) ?f32 {
-            if (self.builder.readIntField(u16, 0) != 10) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 10) { return null; }
             return @bitCast(self.builder.readIntField(u32, 1) ^ 0);
         }
 
@@ -3739,9 +3873,7 @@ pub const Value = struct {
         }
 
         pub fn float64(self: @This()) ?f64 {
-            if (self.builder.readIntField(u16, 0) != 11) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 11) { return null; }
             return @bitCast(self.builder.readIntField(u64, 1) ^ 0);
         }
 
@@ -3751,9 +3883,7 @@ pub const Value = struct {
         }
 
         pub fn text(self: @This()) capnp.BuildError!?[:0]const u8 {
-            if (self.builder.readIntField(u16, 0) != 12) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 12) { return null; }
             return try self.builder.readStringField(0);
         }
 
@@ -3763,9 +3893,7 @@ pub const Value = struct {
         }
 
         pub fn data(self: @This()) capnp.BuildError!?[]const u8 {
-            if (self.builder.readIntField(u16, 0) != 13) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 13) { return null; }
             return try self.builder.readDataField(0);
         }
 
@@ -3775,9 +3903,7 @@ pub const Value = struct {
         }
 
         pub fn list(self: @This()) ?capnp.AnyPointerBuilder {
-            if (self.builder.readIntField(u16, 0) != 14) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 14) { return null; }
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
@@ -3786,10 +3912,9 @@ pub const Value = struct {
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
+
         pub fn @"enum"(self: @This()) ?u16 {
-            if (self.builder.readIntField(u16, 0) != 15) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 15) { return null; }
             return self.builder.readIntField(u16, 1) ^ 0;
         }
 
@@ -3799,9 +3924,7 @@ pub const Value = struct {
         }
 
         pub fn @"struct"(self: @This()) ?capnp.AnyPointerBuilder {
-            if (self.builder.readIntField(u16, 0) != 16) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 16) { return null; }
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
@@ -3810,12 +3933,11 @@ pub const Value = struct {
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
+
         /// The only interface value that can be represented statically is "null", whose methods always
         /// throw exceptions.
         pub fn interface(self: @This()) ?void {
-            if (self.builder.readIntField(u16, 0) != 17) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 17) { return null; }
             return self.builder.readVoid();
         }
 
@@ -3825,9 +3947,7 @@ pub const Value = struct {
         }
 
         pub fn anyPointer(self: @This()) ?capnp.AnyPointerBuilder {
-            if (self.builder.readIntField(u16, 0) != 18) {
-                return null;
-            }
+            if (self.builder.readIntField(u16, 0) != 18) { return null; }
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
 
@@ -3835,6 +3955,8 @@ pub const Value = struct {
             self.builder.writeIntField(u16, 0, 18);
             return self.builder.buildPtrField(capnp.AnyPointerBuilder, 0);
         }
+
+
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -3842,6 +3964,7 @@ pub const Value = struct {
         .ptr_words = 1,
         .builder = @This().Builder.fromStructBuilder,
     };
+
 };
 
 /// Describes an annotation applied to a declaration.  Note AnnotationNode describes the
@@ -3879,6 +4002,7 @@ pub const Annotation = struct {
         pub fn brand(self: @This()) capnp.Error!_Root.Brand.Reader {
             return try self.reader.readPtrField(_Root.Brand.Reader, 1);
         }
+
     };
 
     pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -3894,6 +4018,14 @@ pub const Annotation = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.Annotation.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Annotation.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         /// ID of the annotation node.
@@ -3913,6 +4045,7 @@ pub const Annotation = struct {
             return try self.builder.buildStructField(_Root.Value.Builder, _Root.Value.builder_trait, 0);
         }
 
+
         /// Brand of the annotation.
         ///
         /// Note that the annotation itself is not allowed to be parameterized, but its scope might be.
@@ -3923,6 +4056,8 @@ pub const Annotation = struct {
         pub fn setBrand(self: @This()) capnp.BuildError!_Root.Brand.Builder {
             return try self.builder.buildStructField(_Root.Brand.Builder, _Root.Brand.builder_trait, 1);
         }
+
+
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -3930,6 +4065,7 @@ pub const Annotation = struct {
         .ptr_words = 2,
         .builder = @This().Builder.fromStructBuilder,
     };
+
 };
 
 /// Possible element sizes for encoded lists.  These correspond exactly to the possible values of
@@ -3975,6 +4111,7 @@ pub const CapnpVersion = struct {
         pub fn micro(self: @This()) u8 {
             return self.reader.readIntField(u8, 3) ^ 0;
         }
+
     };
 
     pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -3990,6 +4127,14 @@ pub const CapnpVersion = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.CapnpVersion.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.CapnpVersion.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         pub fn major(self: @This()) u16 {
@@ -4015,6 +4160,7 @@ pub const CapnpVersion = struct {
         pub fn setMicro(self: @This(), v: u8) void {
             self.builder.writeIntField(u8, 3, v ^ 0);
         }
+
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -4022,6 +4168,7 @@ pub const CapnpVersion = struct {
         .ptr_words = 0,
         .builder = @This().Builder.fromStructBuilder,
     };
+
 };
 
 pub const CodeGeneratorRequest = struct {
@@ -4062,6 +4209,7 @@ pub const CodeGeneratorRequest = struct {
                 pub fn name(self: @This()) capnp.Error![:0]const u8 {
                     return try self.reader.readStringField(0);
                 }
+
             };
 
             pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -4077,6 +4225,14 @@ pub const CodeGeneratorRequest = struct {
 
                 pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
                     return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+                }
+
+                pub fn asReader(self: @This()) _Root.CodeGeneratorRequest.RequestedFile.Import.Reader {
+                    return .{ .reader = self.builder.asReader() };
+                }
+
+                pub fn copyFrom(self: @This(), source: _Root.CodeGeneratorRequest.RequestedFile.Import.Reader) void {
+                    self.builder.copyContentFrom(source.reader) catch unreachable;
                 }
 
                 /// ID of the imported file.
@@ -4101,6 +4257,7 @@ pub const CodeGeneratorRequest = struct {
                 pub fn setName(self: @This(), v: [:0]const u8) capnp.BuildError!void {
                     try self.builder.writeStringField(0, v);
                 }
+
             };
 
             pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -4108,6 +4265,7 @@ pub const CodeGeneratorRequest = struct {
                 .ptr_words = 1,
                 .builder = @This().Builder.fromStructBuilder,
             };
+
         };
 
         pub const FileSourceInfo = struct {
@@ -4150,6 +4308,7 @@ pub const CodeGeneratorRequest = struct {
                         pub fn ordinal(self: @This()) u16 {
                             return self.reader.readIntField(u16, 9) ^ 0;
                         }
+
                     };
 
                     pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -4167,6 +4326,14 @@ pub const CodeGeneratorRequest = struct {
                             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
                         }
 
+                        pub fn asReader(self: @This()) _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.member.Reader {
+                            return .{ .reader = self.builder.asReader() };
+                        }
+
+                        pub fn copyFrom(self: @This(), source: _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.member.Reader) void {
+                            self.builder.copyContentFrom(source.reader) catch unreachable;
+                        }
+
                         pub fn parentTypeId(self: @This()) u64 {
                             return self.builder.readIntField(u64, 1) ^ 0;
                         }
@@ -4182,6 +4349,7 @@ pub const CodeGeneratorRequest = struct {
                         pub fn setOrdinal(self: @This(), v: u16) void {
                             self.builder.writeIntField(u16, 9, v ^ 0);
                         }
+
                     };
 
                     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -4189,6 +4357,7 @@ pub const CodeGeneratorRequest = struct {
                         .ptr_words = 0,
                         .builder = @This().Builder.fromStructBuilder,
                     };
+
                 };
 
                 pub const Reader = struct {
@@ -4220,19 +4389,16 @@ pub const CodeGeneratorRequest = struct {
 
                     /// Identifier refers to a type. This is the type ID.
                     pub fn typeId(self: @This()) ?u64 {
-                        if (self.reader.readIntField(u16, 8) != 0) {
-                            return null;
-                        }
+                        if (self.reader.readIntField(u16, 8) != 0) { return null; }
                         return self.reader.readIntField(u64, 1) ^ 0;
                     }
 
                     /// Identifier refers to a member of a type.
                     pub fn member(self: @This()) ?_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.member.Reader {
-                        if (self.reader.readIntField(u16, 8) != 1) {
-                            return null;
-                        }
+                        if (self.reader.readIntField(u16, 8) != 1) { return null; }
                         return .{ .reader = self.reader };
                     }
+
                 };
 
                 pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -4248,6 +4414,14 @@ pub const CodeGeneratorRequest = struct {
 
                     pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
                         return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+                    }
+
+                    pub fn asReader(self: @This()) _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Reader {
+                        return .{ .reader = self.builder.asReader() };
+                    }
+
+                    pub fn copyFrom(self: @This(), source: _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Reader) void {
+                        self.builder.copyContentFrom(source.reader) catch unreachable;
                     }
 
                     pub fn which(self: @This()) _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Tag {
@@ -4272,9 +4446,7 @@ pub const CodeGeneratorRequest = struct {
 
                     /// Identifier refers to a type. This is the type ID.
                     pub fn typeId(self: @This()) ?u64 {
-                        if (self.builder.readIntField(u16, 8) != 0) {
-                            return null;
-                        }
+                        if (self.builder.readIntField(u16, 8) != 0) { return null; }
                         return self.builder.readIntField(u64, 1) ^ 0;
                     }
 
@@ -4285,9 +4457,7 @@ pub const CodeGeneratorRequest = struct {
 
                     /// Identifier refers to a member of a type.
                     pub fn member(self: @This()) ?_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.member.Builder {
-                        if (self.builder.readIntField(u16, 8) != 1) {
-                            return null;
-                        }
+                        if (self.builder.readIntField(u16, 8) != 1) { return null; }
                         return .{ .builder = self.builder };
                     }
 
@@ -4295,6 +4465,7 @@ pub const CodeGeneratorRequest = struct {
                         self.builder.writeIntField(u16, 8, 1);
                         return .{ .builder = self.builder };
                     }
+
                 };
 
                 pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -4302,6 +4473,7 @@ pub const CodeGeneratorRequest = struct {
                     .ptr_words = 0,
                     .builder = @This().Builder.fromStructBuilder,
                 };
+
             };
 
             pub const Reader = struct {
@@ -4322,6 +4494,7 @@ pub const CodeGeneratorRequest = struct {
                 pub fn identifiers(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Reader, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.reader_trait) {
                     return try self.reader.readPtrField(capnp.CompositeListReader(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Reader, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.reader_trait), 0);
                 }
+
             };
 
             pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -4339,6 +4512,14 @@ pub const CodeGeneratorRequest = struct {
                     return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
                 }
 
+                pub fn asReader(self: @This()) _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Reader {
+                    return .{ .reader = self.builder.asReader() };
+                }
+
+                pub fn copyFrom(self: @This(), source: _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Reader) void {
+                    self.builder.copyContentFrom(source.reader) catch unreachable;
+                }
+
                 pub fn identifiers(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.builder_trait) {
                     return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.builder_trait), 0);
                 }
@@ -4346,6 +4527,8 @@ pub const CodeGeneratorRequest = struct {
                 pub fn setIdentifiers(self: @This()) capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.builder_trait) {
                     return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Identifier.builder_trait), 0);
                 }
+
+
             };
 
             pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -4353,6 +4536,7 @@ pub const CodeGeneratorRequest = struct {
                 .ptr_words = 1,
                 .builder = @This().Builder.fromStructBuilder,
             };
+
         };
 
         pub const Reader = struct {
@@ -4389,6 +4573,7 @@ pub const CodeGeneratorRequest = struct {
             pub fn fileSourceInfo(self: @This()) capnp.Error!_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Reader {
                 return try self.reader.readPtrField(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Reader, 2);
             }
+
         };
 
         pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -4404,6 +4589,14 @@ pub const CodeGeneratorRequest = struct {
 
             pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+            }
+
+            pub fn asReader(self: @This()) _Root.CodeGeneratorRequest.RequestedFile.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.CodeGeneratorRequest.RequestedFile.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
             }
 
             /// ID of the file.
@@ -4434,6 +4627,7 @@ pub const CodeGeneratorRequest = struct {
                 return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Import.Builder, _Root.CodeGeneratorRequest.RequestedFile.Import.builder_trait), 1);
             }
 
+
             pub fn fileSourceInfo(self: @This()) capnp.BuildError!_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Builder {
                 return try self.builder.buildStructField(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.builder_trait, 2);
             }
@@ -4441,6 +4635,8 @@ pub const CodeGeneratorRequest = struct {
             pub fn setFileSourceInfo(self: @This()) capnp.BuildError!_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Builder {
                 return try self.builder.buildStructField(_Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.Builder, _Root.CodeGeneratorRequest.RequestedFile.FileSourceInfo.builder_trait, 2);
             }
+
+
         };
 
         pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -4448,6 +4644,7 @@ pub const CodeGeneratorRequest = struct {
             .ptr_words = 3,
             .builder = @This().Builder.fromStructBuilder,
         };
+
     };
 
     pub const Reader = struct {
@@ -4491,6 +4688,7 @@ pub const CodeGeneratorRequest = struct {
         pub fn sourceInfo(self: @This()) capnp.Error!capnp.CompositeListReader(_Root.Node.SourceInfo.Reader, _Root.Node.SourceInfo.reader_trait) {
             return try self.reader.readPtrField(capnp.CompositeListReader(_Root.Node.SourceInfo.Reader, _Root.Node.SourceInfo.reader_trait), 3);
         }
+
     };
 
     pub const reader_trait = capnp.ReaderTrait(@This().Reader){
@@ -4508,6 +4706,14 @@ pub const CodeGeneratorRequest = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.CodeGeneratorRequest.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.CodeGeneratorRequest.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         /// All nodes parsed by the compiler, including for the files on the command line and their
         /// imports.
         pub fn nodes(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Node.Builder, _Root.Node.builder_trait) {
@@ -4518,6 +4724,7 @@ pub const CodeGeneratorRequest = struct {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.Builder, _Root.Node.builder_trait), 0);
         }
 
+
         /// Files which were listed on the command line.
         pub fn requestedFiles(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Builder, _Root.CodeGeneratorRequest.RequestedFile.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Builder, _Root.CodeGeneratorRequest.RequestedFile.builder_trait), 1);
@@ -4526,6 +4733,7 @@ pub const CodeGeneratorRequest = struct {
         pub fn setRequestedFiles(self: @This()) capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Builder, _Root.CodeGeneratorRequest.RequestedFile.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.CodeGeneratorRequest.RequestedFile.Builder, _Root.CodeGeneratorRequest.RequestedFile.builder_trait), 1);
         }
+
 
         /// Version of the `capnp` executable. Generally, code generators should ignore this, but the code
         /// generators that ship with `capnp` itself will print a warning if this mismatches since that
@@ -4541,6 +4749,7 @@ pub const CodeGeneratorRequest = struct {
             return try self.builder.buildStructField(_Root.CapnpVersion.Builder, _Root.CapnpVersion.builder_trait, 2);
         }
 
+
         /// Information about the original source code for each node, where available. This array may be
         /// omitted or may be missing some nodes if no info is available for them.
         pub fn sourceInfo(self: @This()) capnp.BuildError!capnp.CompositeListBuilder(_Root.Node.SourceInfo.Builder, _Root.Node.SourceInfo.builder_trait) {
@@ -4550,6 +4759,8 @@ pub const CodeGeneratorRequest = struct {
         pub fn setSourceInfo(self: @This()) capnp.CompositeListBuilder(_Root.Node.SourceInfo.Builder, _Root.Node.SourceInfo.builder_trait) {
             return self.builder.buildPtrField(capnp.CompositeListBuilder(_Root.Node.SourceInfo.Builder, _Root.Node.SourceInfo.builder_trait), 3);
         }
+
+
     };
 
     pub const builder_trait = capnp.BuilderTrait(@This().Builder){
@@ -4557,4 +4768,6 @@ pub const CodeGeneratorRequest = struct {
         .ptr_words = 4,
         .builder = @This().Builder.fromStructBuilder,
     };
+
 };
+

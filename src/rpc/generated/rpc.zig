@@ -320,6 +320,14 @@ pub const Message = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.Message.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Message.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         pub fn which(self: @This()) _Root.Message.Tag {
             return @fromBackingInt(@intCast(self.builder.readIntField(u16, 0)));
         }
@@ -682,6 +690,14 @@ pub const Bootstrap = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.Bootstrap.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Bootstrap.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         /// A new question ID identifying this request, which will eventually receive a Return message
         /// containing the restored capability.
         pub fn questionId(self: @This()) u32 {
@@ -950,6 +966,14 @@ pub const Call = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Call.sendResultsTo.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Call.sendResultsTo.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn which(self: @This()) _Root.Call.sendResultsTo.Tag {
                 return @fromBackingInt(@intCast(self.builder.readIntField(u16, 3)));
             }
@@ -1148,6 +1172,14 @@ pub const Call = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.Call.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Call.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         /// A number, chosen by the caller, that identifies this call in future messages.  This number
@@ -1430,6 +1462,14 @@ pub const Return = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.Return.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Return.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         pub fn which(self: @This()) _Root.Return.Tag {
             return @fromBackingInt(@intCast(self.builder.readIntField(u16, 3)));
         }
@@ -1658,6 +1698,14 @@ pub const Finish = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.Finish.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Finish.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         /// ID of the call whose result is to be released.
         pub fn questionId(self: @This()) u32 {
             return self.builder.readIntField(u32, 0) ^ 0;
@@ -1828,6 +1876,14 @@ pub const Resolve = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.Resolve.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Resolve.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         pub fn which(self: @This()) _Root.Resolve.Tag {
             return @fromBackingInt(@intCast(self.builder.readIntField(u16, 2)));
         }
@@ -1950,6 +2006,14 @@ pub const Release = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.Release.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Release.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         /// What to release.
@@ -2180,6 +2244,14 @@ pub const Disembargo = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.Disembargo.context.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.Disembargo.context.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn which(self: @This()) _Root.Disembargo.context.Tag {
                 return @fromBackingInt(@intCast(self.builder.readIntField(u16, 2)));
             }
@@ -2307,6 +2379,14 @@ pub const Disembargo = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.Disembargo.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Disembargo.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         /// What is to be disembargoed.
         pub fn target(self: @This()) capnp.BuildError!_Root.MessageTarget.Builder {
             return try self.builder.buildStructField(_Root.MessageTarget.Builder, _Root.MessageTarget.builder_trait, 0);
@@ -2386,6 +2466,14 @@ pub const Provide = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.Provide.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Provide.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         /// Question ID to be held open until the recipient has received the capability.  A result will be
@@ -2512,6 +2600,14 @@ pub const Accept = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.Accept.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Accept.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         /// A new question ID identifying this accept message, which will eventually receive a Return
@@ -2683,6 +2779,14 @@ pub const Join = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.Join.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Join.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         /// Question ID used to respond to this Join.  (Note that this ID only identifies one part of the
         /// request for one hop; each part has a different ID and relayed copies of the request have
         /// (probably) different IDs still.)
@@ -2806,6 +2910,14 @@ pub const MessageTarget = struct {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
         }
 
+        pub fn asReader(self: @This()) _Root.MessageTarget.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.MessageTarget.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
+        }
+
         pub fn which(self: @This()) _Root.MessageTarget.Tag {
             return @fromBackingInt(@intCast(self.builder.readIntField(u16, 2)));
         }
@@ -2893,6 +3005,14 @@ pub const Payload = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.Payload.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Payload.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         /// Some Cap'n Proto data structure.  Capability pointers embedded in this structure index into
@@ -3130,6 +3250,14 @@ pub const CapDescriptor = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.CapDescriptor.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.CapDescriptor.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         pub fn which(self: @This()) _Root.CapDescriptor.Tag {
@@ -3381,6 +3509,14 @@ pub const PromisedAnswer = struct {
                 return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
             }
 
+            pub fn asReader(self: @This()) _Root.PromisedAnswer.Op.Reader {
+                return .{ .reader = self.builder.asReader() };
+            }
+
+            pub fn copyFrom(self: @This(), source: _Root.PromisedAnswer.Op.Reader) void {
+                self.builder.copyContentFrom(source.reader) catch unreachable;
+            }
+
             pub fn which(self: @This()) _Root.PromisedAnswer.Op.Tag {
                 return @fromBackingInt(@intCast(self.builder.readIntField(u16, 0)));
             }
@@ -3463,6 +3599,14 @@ pub const PromisedAnswer = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.PromisedAnswer.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.PromisedAnswer.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         /// ID of the question (in the sender's question table / receiver's answer table) whose answer is
@@ -3552,6 +3696,14 @@ pub const ThirdPartyCapDescriptor = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.ThirdPartyCapDescriptor.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.ThirdPartyCapDescriptor.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         /// Identifies the third-party host and the specific capability to accept from it.
@@ -3720,6 +3872,14 @@ pub const Exception = struct {
 
         pub fn fromBuildContext(capnp_context: capnp.BuildContext) @This() {
             return .{ .builder = capnp.StructBuilder.fromBuildContext(capnp_context) };
+        }
+
+        pub fn asReader(self: @This()) _Root.Exception.Reader {
+            return .{ .reader = self.builder.asReader() };
+        }
+
+        pub fn copyFrom(self: @This(), source: _Root.Exception.Reader) void {
+            self.builder.copyContentFrom(source.reader) catch unreachable;
         }
 
         /// Human-readable failure description.

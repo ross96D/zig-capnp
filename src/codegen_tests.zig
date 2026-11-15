@@ -440,3 +440,217 @@ test "generated non-union void setters compile and work" {
     try std.testing.expectEqual(void_setters.VoidFields.Tag.choice, root.which());
     try std.testing.expect(root.choice() != null);
 }
+
+test "generated struct copyFrom copies all field kinds" {
+    var src_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try src_builder.init();
+    defer src_builder.deinit();
+
+    var src = try src_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
+    try src.setName("root");
+    try src.setBlob(&[_]u8{ 1, 2, 3, 4 });
+    src.setColor(.blue);
+    src.setEnabled(true);
+    src.setRatio(1.5);
+    src.setOffset(-42);
+
+    var colors = try src.colors();
+    try colors.init(3);
+    colors.set(0, .red);
+    colors.set(1, .green);
+    colors.set(2, .blue);
+
+    var child = try src.setChild();
+    try child.setName("child");
+    child.setOffset(7);
+
+    try src.ptr().setText("payload");
+
+    var src_message = src_builder.toReader();
+    const src_reader = try src_message.getRootStruct(features.Features.Reader, features.Features.reader_trait);
+
+    var dst_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try dst_builder.init();
+    defer dst_builder.deinit();
+
+    var dst = try dst_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
+    try dst.copyFrom(src_reader);
+
+    var dst_message = dst_builder.toReader();
+    const got = try dst_message.getRootStruct(features.Features.Reader, features.Features.reader_trait);
+
+    try std.testing.expectEqualStrings("root", try got.name());
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 3, 4 }, try got.blob());
+    try std.testing.expectEqual(features.Color.blue, got.color());
+    try std.testing.expectEqual(src_reader.enabled(), got.enabled());
+    try std.testing.expectEqual(src_reader.ratio(), got.ratio());
+    try std.testing.expectEqual(@as(i32, -42), got.offset());
+
+    const got_colors = try got.colors();
+    try std.testing.expectEqual(@as(u29, 3), got_colors.length);
+    try std.testing.expectEqual(features.Color.red, got_colors.get(0));
+    try std.testing.expectEqual(features.Color.green, got_colors.get(1));
+    try std.testing.expectEqual(features.Color.blue, got_colors.get(2));
+
+    const got_child = try got.child();
+    try std.testing.expectEqualStrings("child", try got_child.name());
+    try std.testing.expectEqual(@as(i32, 7), got_child.offset());
+
+    const got_ptr = try got.ptr();
+    try std.testing.expectEqualStrings("payload", try got_ptr.asText());
+}
+
+test "generated primitive list copyFrom" {
+    var src_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try src_builder.init();
+    defer src_builder.deinit();
+
+    var src = try src_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
+    var colors = try src.colors();
+    try colors.init(4);
+    colors.set(0, .red);
+    colors.set(1, .green);
+    colors.set(2, .blue);
+    colors.set(3, .red);
+
+    var src_message = src_builder.toReader();
+    const src_reader = try src_message.getRootStruct(features.Features.Reader, features.Features.reader_trait);
+
+    var dst_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try dst_builder.init();
+    defer dst_builder.deinit();
+
+    var dst = try dst_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
+    var dst_colors = try dst.colors();
+    try dst_colors.copyFrom(try src_reader.colors());
+
+    var dst_message = dst_builder.toReader();
+    const got = try dst_message.getRootStruct(features.Features.Reader, features.Features.reader_trait);
+    const got_colors = try got.colors();
+
+    try std.testing.expectEqual(@as(u29, 4), got_colors.length);
+    try std.testing.expectEqual(features.Color.red, got_colors.get(0));
+    try std.testing.expectEqual(features.Color.green, got_colors.get(1));
+    try std.testing.expectEqual(features.Color.blue, got_colors.get(2));
+    try std.testing.expectEqual(features.Color.red, got_colors.get(3));
+}
+
+test "generated composite list copyFrom" {
+    var src_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try src_builder.init();
+    defer src_builder.deinit();
+
+    var src = try src_builder.initRootStruct(composite.Lists.Builder, composite.Lists.builder_trait);
+    var dates = try src.dates();
+    try dates.init(2);
+
+    var first = dates.get(0);
+    first.setYear(2023);
+    first.setMonth(7);
+    first.setDay(14);
+
+    var second = dates.get(1);
+    second.setYear(2022);
+    second.setMonth(12);
+    second.setDay(31);
+
+    var src_message = src_builder.toReader();
+    const src_reader = try src_message.getRootStruct(composite.Lists.Reader, composite.Lists.reader_trait);
+
+    // Copy the whole struct (exercises the generic pointer/list copy path).
+    var whole_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try whole_builder.init();
+    defer whole_builder.deinit();
+
+    var whole = try whole_builder.initRootStruct(composite.Lists.Builder, composite.Lists.builder_trait);
+    try whole.copyFrom(src_reader);
+
+    var whole_message = whole_builder.toReader();
+    const whole_reader = try whole_message.getRootStruct(composite.Lists.Reader, composite.Lists.reader_trait);
+    const whole_dates = try whole_reader.dates();
+    try std.testing.expectEqual(@as(u29, 2), whole_dates.length);
+    try std.testing.expectEqual(@as(i16, 2023), whole_dates.get(0).year());
+    try std.testing.expectEqual(@as(u8, 7), whole_dates.get(0).month());
+    try std.testing.expectEqual(@as(i16, 2022), whole_dates.get(1).year());
+
+    // Copy just the composite list through CompositeListBuilder.copyFrom.
+    var list_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try list_builder.init();
+    defer list_builder.deinit();
+
+    var list_root = try list_builder.initRootStruct(composite.Lists.Builder, composite.Lists.builder_trait);
+    var list_dates = try list_root.dates();
+    try list_dates.copyFrom(try src_reader.dates());
+
+    var list_message = list_builder.toReader();
+    const list_reader = try list_message.getRootStruct(composite.Lists.Reader, composite.Lists.reader_trait);
+    const got_dates = try list_reader.dates();
+    try std.testing.expectEqual(@as(u29, 2), got_dates.length);
+    try std.testing.expectEqual(@as(u8, 31), got_dates.get(1).day());
+}
+
+test "generated union and group copyFrom" {
+    var union_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try union_builder.init();
+    defer union_builder.deinit();
+
+    var union_root = try union_builder.initRootStruct(unions.UnionTestList.Builder, unions.UnionTestList.builder_trait);
+    var union_list = try union_root.unionTests();
+    try union_list.init(2);
+    union_list.get(0).setInt32(123);
+    union_list.get(1).setVoid();
+
+    var union_message = union_builder.toReader();
+    const union_reader = try union_message.getRootStruct(unions.UnionTestList.Reader, unions.UnionTestList.reader_trait);
+
+    var union_dst_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try union_dst_builder.init();
+    defer union_dst_builder.deinit();
+
+    var union_dst = try union_dst_builder.initRootStruct(unions.UnionTestList.Builder, unions.UnionTestList.builder_trait);
+    try union_dst.copyFrom(union_reader);
+
+    var union_dst_message = union_dst_builder.toReader();
+    const union_got = try union_dst_message.getRootStruct(unions.UnionTestList.Reader, unions.UnionTestList.reader_trait);
+    const got_list = try union_got.unionTests();
+    try std.testing.expectEqual(@as(u29, 2), got_list.length);
+    try std.testing.expectEqual(unions.UnionTest.Tag.int32, got_list.get(0).which());
+    try std.testing.expectEqual(@as(?i32, 123), got_list.get(0).int32());
+    try std.testing.expectEqual(unions.UnionTest.Tag.void, got_list.get(1).which());
+
+    const group_reader = groups.pointTest();
+
+    var group_dst_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try group_dst_builder.init();
+    defer group_dst_builder.deinit();
+
+    var group_dst = try group_dst_builder.initRootStruct(groups.WithGroup.Builder, groups.WithGroup.builder_trait);
+    try group_dst.copyFrom(group_reader);
+
+    var group_dst_message = group_dst_builder.toReader();
+    const group_got = try group_dst_message.getRootStruct(groups.WithGroup.Reader, groups.WithGroup.reader_trait);
+    try std.testing.expectEqual(@as(i32, 10), group_got.point().x());
+    try std.testing.expectEqual(@as(i32, 20), group_got.point().y());
+}
+
+test "generated builder copyFrom accepts asReader" {
+    var src_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try src_builder.init();
+    defer src_builder.deinit();
+
+    var src = try src_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
+    try src.setName("from-builder");
+    src.setOffset(99);
+
+    var dst_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
+    try dst_builder.init();
+    defer dst_builder.deinit();
+
+    var dst = try dst_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
+    try dst.copyFrom(src.asReader());
+
+    var dst_message = dst_builder.toReader();
+    const got = try dst_message.getRootStruct(features.Features.Reader, features.Features.reader_trait);
+    try std.testing.expectEqualStrings("from-builder", try got.name());
+    try std.testing.expectEqual(@as(i32, 99), got.offset());
+}

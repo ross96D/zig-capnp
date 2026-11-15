@@ -1468,6 +1468,28 @@ pub fn Refactor(comptime W: type) type {
                     try ctx.writeIndent();
                     try ctx.writer.writeAll("}\n\n");
 
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub fn asReader(self: @This()) ");
+                    try writeNodeTypeName(ctx, node);
+                    try ctx.writer.writeAll(".Reader {\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("return .{ .reader = self.builder.asReader() };\n");
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("}\n\n");
+
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("pub fn copyFrom(self: @This(), source: ");
+                    try writeNodeTypeName(ctx, node);
+                    try ctx.writer.writeAll(".Reader) void {\n");
+                    ctx.indenter.inc();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("self.builder.copyContentFrom(source.reader) catch unreachable;\n");
+                    ctx.indenter.dec();
+                    try ctx.writeIndent();
+                    try ctx.writer.writeAll("}\n\n");
+
                     if (struct_.discriminantCount() > 0) {
                         try ctx.writeIndent();
                         try ctx.writer.writeAll("pub fn which(self: @This()) ");

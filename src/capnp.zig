@@ -501,6 +501,14 @@ pub const AnyPointerListBuilder = struct {
         } });
     }
 
+    pub fn copyFrom(self: *AnyPointerListBuilder, source: AnyPointerListReader) BuildError!void {
+        try self.init(source.length);
+
+        for (0..source.length) |i| {
+            try self.get(@intCast(i)).setFromReader(try source.get(@intCast(i)));
+        }
+    }
+
     pub fn get(self: AnyPointerListBuilder, index: u32) AnyPointerBuilder {
         std.debug.assert(index < self.length);
         var context = self.context.?;
@@ -693,19 +701,55 @@ pub const StructBuilder = struct {
         }
     }
 
-    pub fn readPtrField(self: StructBuilder, comptime T: type, ptr_no: u16) Error!T {
-        var counter = Counter{ .limit = 8 * 1024 * 1024 };
-        const reader = StructReader{
+    pub fn asReader(self: StructBuilder) StructReader {
+        self.context.builder.traversal_counter = Counter{ .limit = 8 * 1024 * 1024 };
+
+        return .{
             .context = .{
                 .segments = self.context.segments.*,
                 .segment = self.context.segment,
                 .offset_words = self.context.offset_words,
-                .traversal_counter = &counter,
+                .traversal_counter = &self.context.builder.traversal_counter,
             },
             .data_words = self.data_words,
             .ptr_words = self.ptr_words,
         };
-        return reader.readPtrField(T, ptr_no);
+    }
+
+    pub fn copyContentFrom(self: StructBuilder, source: StructReader) BuildError!void {
+        const shared_data = @min(self.data_words, source.data_words);
+
+        if (shared_data != 0) {
+            const bytes: usize = @as(usize, shared_data) * 8;
+            const src_start: usize = source.context.offsetBytes();
+            const dst_start: usize = self.context.offsetBytes();
+
+            const src = source.context.segments[source.context.segment][src_start..][0..bytes];
+            const dst = self.context.segments.*[self.context.segment][dst_start..][0..bytes];
+
+            @memcpy(dst, src);
+        }
+
+        if (self.data_words > shared_data) {
+            const start: usize = @as(usize, self.context.offsetBytes()) + @as(usize, shared_data) * 8;
+            const bytes: usize = @as(usize, self.data_words - shared_data) * 8;
+            @memset(self.context.segments.*[self.context.segment][start..][0..bytes], 0);
+        }
+
+        for (0..self.ptr_words) |i| {
+            const ptr_no: u16 = @intCast(i);
+            const dest = self.buildPtrField(AnyPointerBuilder, ptr_no);
+
+            if (ptr_no < source.ptr_words) {
+                try dest.setFromReader(try source.readPtrField(AnyPointerReader, ptr_no));
+            } else {
+                dest.clear();
+            }
+        }
+    }
+
+    pub fn readPtrField(self: StructBuilder, comptime T: type, ptr_no: u16) Error!T {
+        return self.asReader().readPtrField(T, ptr_no);
     }
 
     pub fn readStringField(self: StructBuilder, ptr_no: u16) Error![:0]const u8 {
@@ -806,6 +850,18 @@ fn listElementSize(comptime T: type) u3 {
     };
 }
 
+fn listWordCount(element_size: u3, count: u29) BuildError!u32 {
+    return switch (element_size) {
+        0 => 0,
+        1 => (std.math.add(u32, count, 63) catch return Error.MessageTooLarge) / 64,
+        2 => (std.math.add(u32, count, 7) catch return Error.MessageTooLarge) / 8,
+        3 => (std.math.add(u32, count, 3) catch return Error.MessageTooLarge) / 4,
+        4 => (std.math.add(u32, count, 1) catch return Error.MessageTooLarge) / 2,
+        5, 6 => count,
+        7 => unreachable,
+    };
+}
+
 fn listGet(comptime T: type, context: ReadContext, ix: u32) T {
     if (T == bool) {
         const bucket = ix / 8;
@@ -903,16 +959,7 @@ pub fn ListBuilder(comptime T: type) type {
         pub fn init(self: *Self, length: u29) BuildError!void {
             if (self.length != 0) return Error.AlreadyInitialized;
 
-            const element_count: u32 = length;
-            const size_in_words: u32 = switch (element_size) {
-                0 => 0,
-                1 => (element_count + 63) / 64,
-                2 => (element_count + 7) / 8,
-                3 => (element_count + 3) / 4,
-                4 => (element_count + 1) / 2,
-                5 => element_count,
-                else => unreachable,
-            };
+            const size_in_words = try listWordCount(element_size, length);
 
             const object = try self.ptr.builder.allocObject(self.ptr, size_in_words);
             self.context = object.content;
@@ -923,6 +970,23 @@ pub fn ListBuilder(comptime T: type) type {
                 .elements_or_words = length,
                 .element_size = element_size,
             } });
+        }
+
+        pub fn copyFrom(self: *Self, source: ListReader(T)) BuildError!void {
+            try self.init(source.length);
+
+            const words = try listWordCount(element_size, source.length);
+            if (words == 0) return;
+
+            const bytes: usize = @as(usize, words) * 8;
+            const src_start: usize = source.context.offsetBytes();
+            const dst = self.context.?;
+            const dst_start: usize = dst.offsetBytes();
+
+            const src = source.context.segments[source.context.segment][src_start..][0..bytes];
+            const dest = dst.segments.*[dst.segment][dst_start..][0..bytes];
+
+            @memcpy(dest, src);
         }
 
         pub fn set(self: *Self, index: u32, value: T) void {
@@ -999,6 +1063,35 @@ pub fn CompositeListBuilder(
                 .elements_or_words = @intCast(element_words),
                 .element_size = 7,
             } });
+        }
+
+        pub fn copyFrom(self: *Self, source: anytype) BuildError!void {
+            try self.init(source.length);
+            if (source.length == 0) return;
+
+            const src_stride = @as(u64, source.dataWords) + source.ptrWords;
+            const dst_stride = @as(u64, trait.data_words) + trait.ptr_words;
+
+            const src_context = source.context.?;
+            const dst_context = self.context.?;
+
+            for (0..source.length) |i| {
+                var src = src_context;
+                src.offset_words = @intCast(@as(u64, src.offset_words) + src_stride * i);
+
+                var dst = dst_context;
+                dst.offset_words = @intCast(@as(u64, dst.offset_words) + dst_stride * i);
+
+                try (StructBuilder{
+                    .context = dst,
+                    .data_words = trait.data_words,
+                    .ptr_words = trait.ptr_words,
+                }).copyContentFrom(.{
+                    .context = src,
+                    .data_words = source.dataWords,
+                    .ptr_words = source.ptrWords,
+                });
+            }
         }
 
         pub fn get(self: Self, ix: u32) T {
@@ -1367,8 +1460,10 @@ pub const MessageBuilder = struct {
     segment_store: [16][]u8 = std.mem.zeroes([16][]u8),
     segment_capacity: [16]u32 = std.mem.zeroes([16]u32),
     segments: [][]u8 = std.mem.zeroes([][]u8),
+    traversal_counter: Counter = Counter{ .limit = 8 * 1024 * 1024 },
 
     pub fn init(self: *MessageBuilder) BuildError!void {
+        self.traversal_counter = Counter{ .limit = 8 * 1024 * 1024 };
         _ = try self.expandAssert(1);
     }
 
@@ -1570,18 +1665,6 @@ pub const MessageBuilder = struct {
         try packing.pack(writer, bytes);
     }
 
-    fn listWordCount(element_size: u3, count: u29) BuildError!u32 {
-        return switch (element_size) {
-            0 => 0,
-            1 => (std.math.add(u32, count, 63) catch return Error.MessageTooLarge) / 64,
-            2 => (std.math.add(u32, count, 7) catch return Error.MessageTooLarge) / 8,
-            3 => (std.math.add(u32, count, 3) catch return Error.MessageTooLarge) / 4,
-            4 => (std.math.add(u32, count, 1) catch return Error.MessageTooLarge) / 2,
-            5, 6 => count,
-            7 => unreachable,
-        };
-    }
-
     fn copyStructBody(
         self: *MessageBuilder,
         source: ReadContext,
@@ -1590,8 +1673,14 @@ pub const MessageBuilder = struct {
         ptr_words: u16,
         allow_caps: bool,
     ) BuildError!void {
-        for (0..data_words) |i| {
-            dest.writeInt(u64, @intCast(i), source.readInt(u64, @intCast(i)));
+        if (data_words != 0) {
+            const bytes: usize = @as(usize, data_words) * 8;
+            const src_start: usize = source.offsetBytes();
+            const dst_start: usize = dest.offsetBytes();
+
+            const src = source.segments[source.segment][src_start..][0..bytes];
+            const dst = dest.segments.*[dest.segment][dst_start..][0..bytes];
+            @memcpy(dst, src);
         }
         for (0..ptr_words) |i| {
             var src = source;
@@ -1650,10 +1739,14 @@ pub const MessageBuilder = struct {
                 dst.offset_words += @intCast(i);
                 try self.copyPointerToInternal(&dst, .{ .context = src, .ptr = ptr }, allow_caps);
             }
-        } else {
-            for (0..words) |i| {
-                object.content.writeInt(u64, @intCast(i), source.readInt(u64, @intCast(i)));
-            }
+        } else if (words != 0) {
+            const bytes: usize = @as(usize, words) * 8;
+            const src_start: usize = source.offsetBytes();
+            const dst_start: usize = object.content.offsetBytes();
+
+            const src = source.segments[source.segment][src_start..][0..bytes];
+            const dst = object.content.segments.*[object.content.segment][dst_start..][0..bytes];
+            @memcpy(dst, src);
         }
     }
 
