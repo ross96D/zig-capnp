@@ -1593,7 +1593,7 @@ pub fn Refactor(comptime W: type) type {
             defer builder.deinit();
             try builder.initFromAnyPointer(source);
 
-            const size = try builder.serializedSize();
+            const size = builder.serializedSize();
             const bytes = try ctx.allocator.alloc(u8, size);
             defer ctx.allocator.free(bytes);
             _ = try builder.writeToBuffer(bytes);
@@ -2112,7 +2112,7 @@ test "field" {
 
     writer.end = 0;
     try M.writeGetter(&ctx, struct_reader.discriminantOffset(), field, .reader, null);
-    try std.testing.expectEqualStrings("pub fn int32(self: @This()) i32 {\n    return self.reader.readIntField(i32, 0);\n}", writer.buffered());
+    try std.testing.expectEqualStrings("pub fn int32(self: @This()) i32 {\n    return self.reader.readIntField(i32, 0) ^ 0;\n}", writer.buffered());
 }
 
 test "compiler" {

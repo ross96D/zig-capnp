@@ -969,7 +969,7 @@ test "packed message round-trip through public API" {
     var root = try builder.initRootStruct(OneWord.Builder, OneWord.builder_trait);
     root.setValue(0x0123_4567_89ab_cdef);
 
-    const size = try builder.serializedSize();
+    const size = builder.serializedSize();
     const scratch = try testing.allocator.alloc(u8, size);
     defer testing.allocator.free(scratch);
 

@@ -6,7 +6,7 @@ const rpc = @import("generated/rpc.zig");
 const twoparty = @import("generated/rpc_twoparty.zig");
 const wire = @import("wire.zig");
 
-const Transport = @import("transport.zig").Transport;
+const Transport = @import("transports/mod.zig").Transport;
 const MessageParts = @import("transport.zig").MessageParts;
 const SlotMap = @import("slot_map.zig").SlotMap;
 

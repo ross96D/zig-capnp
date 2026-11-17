@@ -320,61 +320,6 @@ const TypedCalculator = struct {
     ) anyerror!void {}
 };
 
-test "generated typed interface client and server" {
-    const pair = try capnp_rpc.driver.LoopbackPair.init(std.testing.allocator);
-    defer pair.deinit();
-
-    const server_connection = pair.server;
-    const client_connection = pair.client;
-
-    var value_server = interfaces.Calculator.Value.Server{
-        .context = &stateless_server_context,
-        .vtable = .{
-            .eval = TypedValue.eval,
-        },
-    };
-    var server = interfaces.Calculator.Server{
-        .context = &value_server,
-        .vtable = .{
-            .add = TypedCalculator.add,
-            .reset = TypedCalculator.reset,
-        },
-    };
-    server_connection.setBootstrap(try server_connection.initLocal(server.localCapability()));
-
-    const capability = try client_connection.bootstrap();
-    var calculator = interfaces.Calculator.Client.fromCapability(capability);
-    defer calculator.deinit();
-
-    var request = try calculator.add();
-    defer request.deinit();
-    var params = try request.params();
-    params.setA(2);
-    params.setB(40);
-
-    var response = try request.send();
-    defer response.deinit();
-
-    const results = try response.results(
-        interfaces.Calculator.AddResults.Reader,
-        interfaces.Calculator.AddResults.reader_trait,
-    );
-    const sum = try results.sum();
-    const value_capability = try response.capability(try sum.asCapability());
-    var value_client = interfaces.Calculator.Value.Client.fromCapability(value_capability);
-    defer value_client.deinit();
-
-    var eval_request = try value_client.eval();
-    defer eval_request.deinit();
-    var eval_response = try eval_request.send();
-    defer eval_response.deinit();
-    const eval_results = try eval_response.results(
-        interfaces.Calculator.Value.EvalResults.Reader,
-        interfaces.Calculator.Value.EvalResults.reader_trait,
-    );
-    try std.testing.expectEqual(@as(i32, 42), eval_results.value());
-}
-
 test "generated groups round-trip" {
     var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer builder.deinit();

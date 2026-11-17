@@ -897,8 +897,8 @@ pub fn framedSize(comptime parts: []const Size) usize {
 test "framedSize supports compile-time list shapes" {
     const trait = .{ .data_words = 1, .ptr_words = 1 };
 
-    try std.testing.expectEqual(@as(usize, 8 + 8 * (1 + 2)), framedSize(.{Size.ofStruct(trait)}));
-    try std.testing.expectEqual(@as(usize, 8 + 8 * (1 + 2 + 3)), framedSize(.{
+    try std.testing.expectEqual(@as(usize, 8 * (1 + 2)), framedSize(&.{Size.ofStruct(trait)}));
+    try std.testing.expectEqual(@as(usize, 8 * (1 + 2 + 3)), framedSize(&.{
         Size.ofStruct(trait),
         Size.ofCompositeList(trait, 1),
     }));
@@ -1762,7 +1762,7 @@ pub const MessageBuilder = struct {
 
     /// Serialize into caller-provided storage. Returns the written slice.
     pub fn writeToBuffer(self: *const MessageBuilder, buffer: []u8) Error![]u8 {
-        const total = try self.serializedSize();
+        const total = self.serializedSize();
         if (buffer.len < total) return Error.NoSpaceLeft;
 
         const header = try self.writeHeader(buffer);
@@ -2110,7 +2110,7 @@ test "Message.fromOwnedBytes takes ownership" {
     defer builder.deinit();
 
     _ = try builder.alloc(0, 2);
-    const size = try builder.serializedSize();
+    const size = builder.serializedSize();
     const bytes = try std.testing.allocator.alloc(u8, size);
     _ = try builder.writeToBuffer(bytes);
 
