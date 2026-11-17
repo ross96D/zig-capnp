@@ -351,8 +351,7 @@ test "regression: Ptr round-trips through u64" {
 }
 
 test "regression: writeBoolField preserves sibling bits" {
-    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer builder.deinit();
 
     var value = try builder.initRootStruct(OneWord.Builder, OneWord.builder_trait);
@@ -446,14 +445,13 @@ test "BUG: Counter permits a zero-sized increment at a zero limit" {
 }
 
 test "BUG: alloc must allow an allocation that exactly fits a segment" {
-    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer builder.deinit();
 
     // Segment 0 starts with 2^16 bytes = 8192 words of capacity.
     _ = try builder.alloc(0, 8192);
 
-    try testing.expectEqual(@as(usize, 1), builder.segments.len);
+    try testing.expectEqual(@as(usize, 1), builder.segmentCount());
 }
 
 test "BUG: struct pointer whose data section exceeds the segment is rejected" {
@@ -610,28 +608,25 @@ test "BUG: Counter overflow is reported as a limit error, not an integer overflo
 }
 
 test "BUG: alloc spare-space computation must not underflow" {
-    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer builder.deinit();
 
     _ = try builder.alloc(0, 8192);
 
-    const before = builder.segments.len;
+    const before = builder.segmentCount();
     _ = try builder.alloc(1, 8193); // 65544 bytes: larger than any existing segment
-    try testing.expectEqual(before + 1, builder.segments.len);
+    try testing.expectEqual(before + 1, builder.segmentCount());
 }
 
 test "regression: alloc rejects word counts larger than a segment" {
-    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer builder.deinit();
 
     try expectAnyError(builder.alloc(0, std.math.maxInt(u32)));
 }
 
 test "regression: root struct larger than one segment must round-trip" {
-    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer builder.deinit();
 
     var value = try builder.initRootStruct(BigStruct.Builder, BigStruct.builder_trait);
@@ -657,8 +652,7 @@ test "regression: root struct larger than one segment must round-trip" {
 
 test "regression: empty lists round-trip at the end of a segment" {
     {
-        var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
-        try builder.init();
+        var builder = try capnp.GrowableMessage.init(testing.allocator, 65536);
         defer builder.deinit();
 
         var holder = try builder.initRootStruct(ByteListHolder.Builder, ByteListHolder.builder_trait);
@@ -672,8 +666,7 @@ test "regression: empty lists round-trip at the end of a segment" {
     }
 
     {
-        var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
-        try builder.init();
+        var builder = try capnp.GrowableMessage.init(testing.allocator, 65536);
         defer builder.deinit();
 
         var holder = try builder.initRootStruct(ItemListHolder.Builder, ItemListHolder.builder_trait);
@@ -688,8 +681,7 @@ test "regression: empty lists round-trip at the end of a segment" {
 }
 
 test "regression: empty struct is encoded with offset -1" {
-    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer builder.deinit();
 
     _ = try builder.initRootStruct(Empty.Builder, Empty.builder_trait);
@@ -707,8 +699,7 @@ test "regression: empty struct is encoded with offset -1" {
 }
 
 test "BUG: byte list that crosses a segment must round-trip" {
-    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer builder.deinit();
 
     {
@@ -730,8 +721,7 @@ test "BUG: byte list that crosses a segment must round-trip" {
 }
 
 test "BUG: composite list that crosses a segment must round-trip" {
-    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer builder.deinit();
 
     {
@@ -753,8 +743,7 @@ test "BUG: composite list that crosses a segment must round-trip" {
 }
 
 test "BUG: initRootStruct must not silently write the root pointer at a non-zero word" {
-    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer builder.deinit();
 
     // Occupy words 0..4. The root pointer normally has to live at word 0.
@@ -974,8 +963,7 @@ test "BUG: composite list with a non-struct tag must be an error" {
 }
 
 test "packed message round-trip through public API" {
-    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer builder.deinit();
 
     var root = try builder.initRootStruct(OneWord.Builder, OneWord.builder_trait);
@@ -999,8 +987,7 @@ test "packed message round-trip through public API" {
 }
 
 test "BUG: ListBuilder.init can be called twice without an error" {
-    var builder = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer builder.deinit();
 
     var holder = try builder.initRootStruct(ByteListHolder.Builder, ByteListHolder.builder_trait);

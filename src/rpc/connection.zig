@@ -490,7 +490,7 @@ pub const Response = struct {
 };
 
 pub const RequestPending = struct {
-    message: *capnp.MessageBuilder,
+    message: *capnp.GrowableMessage,
     call: rpc.Call.Builder,
     question_id: u32,
     question: ?*QuestionRef = null,
@@ -1290,16 +1290,11 @@ pub const Connection = struct {
         const question = try self.newQuestion();
         errdefer self.destroyQuestion(question);
 
-        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
-        try message.init();
-        defer message.deinit();
-
-        var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
-        var bootstrap_message = try root.setBootstrap();
-        bootstrap_message.setQuestionId(question.id);
+        var frame: [wire_builder.bootstrap_size]u8 align(8) = undefined;
+        const bytes = try wire_builder.buildBootstrapInto(&frame, question.id);
 
         question.sent = true;
-        try self.sendMessage(&message);
+        try self.sendRaw(.{ .header = bytes });
         return .{ .connection = self, .state = .{ .question = question } };
     }
 
@@ -1445,10 +1440,9 @@ pub const Connection = struct {
         const question = try self.newQuestion();
         errdefer self.destroyQuestion(question);
 
-        const message = try self.allocator.create(capnp.MessageBuilder);
+        const message = try self.allocator.create(capnp.GrowableMessage);
         errdefer self.allocator.destroy(message);
-        message.* = .{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
-        try message.init();
+        message.* = try capnp.GrowableMessage.init(self.allocator, message_initial_segment_bytes);
         errdefer message.deinit();
 
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
@@ -1481,10 +1475,9 @@ pub const Connection = struct {
     ) !Request {
         if (entry.connection != self) return error.WrongConnection;
         const question_id = self.allocLocalId();
-        const message = try self.allocator.create(capnp.MessageBuilder);
+        const message = try self.allocator.create(capnp.GrowableMessage);
         errdefer self.allocator.destroy(message);
-        message.* = .{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
-        try message.init();
+        message.* = try capnp.GrowableMessage.init(self.allocator, message_initial_segment_bytes);
         errdefer message.deinit();
 
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
@@ -1538,10 +1531,9 @@ pub const Connection = struct {
         const question = try self.newQuestion();
         errdefer self.destroyQuestion(question);
 
-        const message = try self.allocator.create(capnp.MessageBuilder);
+        const message = try self.allocator.create(capnp.GrowableMessage);
         errdefer self.allocator.destroy(message);
-        message.* = .{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
-        try message.init();
+        message.* = try capnp.GrowableMessage.init(self.allocator, message_initial_segment_bytes);
         errdefer message.deinit();
 
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
@@ -1651,7 +1643,7 @@ pub const Connection = struct {
     }
 
     /// Send a message without flattening it into a single allocation.
-    fn sendMessage(self: *Connection, message: *const capnp.MessageBuilder) !void {
+    fn sendMessage(self: *Connection, message: anytype) !void {
         var header_buffer: [message_header_buffer_bytes]u8 = undefined;
         const parts = transport.MessageParts{
             .header = try message.writeHeader(&header_buffer),
@@ -1662,7 +1654,7 @@ pub const Connection = struct {
 
     /// Allocate an exact-size buffer and serialize into it. Used where the
     /// bytes must outlive the send (e.g. stored answers and local responses).
-    fn serializeMessage(self: *Connection, message: *const capnp.MessageBuilder) ![]u8 {
+    fn serializeMessage(self: *Connection, message: anytype) ![]u8 {
         const size = try message.serializedSize();
         const bytes = try self.allocator.alloc(u8, size);
         errdefer self.allocator.free(bytes);
@@ -1695,8 +1687,8 @@ pub const Connection = struct {
     }
 
     fn sendFinish(self: *Connection, question_id: u32, release_result_caps: bool) !void {
-        const bytes = try wire_builder.buildFinish(self.allocator, question_id, release_result_caps);
-        defer self.allocator.free(bytes);
+        var frame: [wire_builder.finish_size]u8 align(8) = undefined;
+        const bytes = try wire_builder.buildFinishInto(&frame, question_id, release_result_caps);
         try self.sendRaw(.{ .header = bytes });
     }
 
@@ -1770,8 +1762,7 @@ pub const Connection = struct {
             },
         };
 
-        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
-        try message.init();
+        var message = try capnp.GrowableMessage.init(self.allocator, message_initial_segment_bytes);
         defer message.deinit();
 
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
@@ -1959,8 +1950,7 @@ pub const Connection = struct {
         const question = try self.newQuestion();
         errdefer self.destroyQuestion(question);
 
-        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
-        try message.init();
+        var message = try capnp.GrowableMessage.init(self.allocator, message_initial_segment_bytes);
         defer message.deinit();
 
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
@@ -2020,8 +2010,7 @@ pub const Connection = struct {
         // result exports must stay alive while the original caller can still
         // take result capabilities from this relayed Return.
 
-        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
-        try message.init();
+        var message = try capnp.GrowableMessage.init(self.allocator, message_initial_segment_bytes);
         defer message.deinit();
 
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
@@ -2177,8 +2166,7 @@ pub const Connection = struct {
             result_caps.deinit(self.allocator);
         }
 
-        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
-        try message.init();
+        var message = try capnp.GrowableMessage.init(self.allocator, message_initial_segment_bytes);
         defer message.deinit();
 
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
@@ -2557,18 +2545,9 @@ pub const Connection = struct {
     }
 
     fn sendEmbargo(self: *Connection, entry: *ImportEntry, embargo_id: u32) !void {
-        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
-        try message.init();
-        defer message.deinit();
-
-        var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
-        var disembargo = try root.setDisembargo();
-        var target = try disembargo.target();
-        target.setImportedCap(entry.export_id);
-        var context = disembargo.context();
-        context.setSenderLoopback(embargo_id);
-
-        try self.sendMessage(&message);
+        var frame: [wire_builder.disembargo_size]u8 align(8) = undefined;
+        const bytes = try wire_builder.buildDisembargoInto(&frame, entry.export_id, embargo_id);
+        try self.sendRaw(.{ .header = bytes });
     }
 
     fn wouldCreateResolveCycle(
@@ -2861,18 +2840,9 @@ pub const Connection = struct {
         };
         if (imported.connection != self) return error.WrongConnection;
 
-        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
-        try message.init();
-        defer message.deinit();
-
-        var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
-        var disembargo = try root.setDisembargo();
-        var target_builder = try disembargo.target();
-        target_builder.setImportedCap(imported.export_id);
-        var context = disembargo.context();
-        context.setSenderLoopback(embargo_id);
-
-        try self.sendMessage(&message);
+        var frame: [wire_builder.disembargo_size]u8 align(8) = undefined;
+        const bytes = try wire_builder.buildDisembargoInto(&frame, imported.export_id, embargo_id);
+        try self.sendRaw(.{ .header = bytes });
     }
 
     fn handleDisembargo(self: *Connection, disembargo: rpc.Disembargo.Reader) !void {
@@ -2881,8 +2851,7 @@ pub const Connection = struct {
             .senderLoopback => {
                 const embargo_id = context.senderLoopback() orelse return;
 
-                var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
-                try message.init();
+                var message = try capnp.GrowableMessage.init(self.allocator, message_initial_segment_bytes);
                 defer message.deinit();
 
                 var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
@@ -2930,8 +2899,7 @@ pub const Connection = struct {
     }
 
     fn sendResolve(self: *Connection, promise_id: u32, target: Capability) !void {
-        var message = capnp.MessageBuilder{ .allocator = self.allocator, .next_segment_bytes = message_initial_segment_bytes };
-        try message.init();
+        var message = try capnp.GrowableMessage.init(self.allocator, message_initial_segment_bytes);
         defer message.deinit();
 
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
@@ -2944,8 +2912,8 @@ pub const Connection = struct {
     }
 
     fn sendRelease(self: *Connection, export_id: u32, reference_count: u32) !void {
-        const bytes = try wire_builder.buildRelease(self.allocator, export_id, reference_count);
-        defer self.allocator.free(bytes);
+        var frame: [wire_builder.release_size]u8 align(8) = undefined;
+        const bytes = try wire_builder.buildReleaseInto(&frame, export_id, reference_count);
         try self.sendRaw(.{ .header = bytes });
     }
 

@@ -5,8 +5,6 @@
 
 const std = @import("std");
 
-pub const Side = enum(u8) { client = 0, server = 1 };
-
 /// A framed message split into its header and segment payloads.
 ///
 /// Transports may write these directly (e.g. `writev` or a queue append)
@@ -55,50 +53,67 @@ pub const MessageParts = struct {
 
 pub const Transport = struct {
     context: *anyopaque,
-    side: Side = .client,
     vtable: *const VTable,
 
+    pub const Error = error{
+        Closed, // peer hung up or we shut down; terminal
+        ProtocolError, // malformed frame / limits exceeded; terminal
+        OutOfMemory,
+    };
+
+    pub const Interest = enum { none, read, write, read_write };
+    pub const Waker = struct { context: *anyopaque, wake: *const fn (*anyopaque) void };
+
     pub const VTable = struct {
-        /// Non-blocking. Copy/write framed message parts into the transport's
-        /// output queue and write whatever the peer accepts immediately.
-        ///
-        /// `parts` is borrowed only for the duration of this call; transports
-        /// must copy or write it before returning.
-        send: *const fn (transport: Transport, parts: MessageParts) anyerror!void,
-        /// Non-blocking. Return one complete message, or null if no complete
-        /// message is currently buffered.
-        receive: *const fn (transport: Transport, allocator: std.mem.Allocator) anyerror!?[]u8,
-        /// Non-blocking. Continue writing buffered outbound bytes.
-        flush: *const fn (transport: Transport) anyerror!void,
-        /// File descriptor to poll, or -1 for in-memory transports.
-        fd: *const fn (transport: Transport) std.posix.fd_t,
-        /// True while send() has buffered bytes waiting for writability.
-        wantsWrite: *const fn (transport: Transport) bool,
-        /// True after EOF or a fatal transport error.
-        isClosed: *const fn (transport: Transport) bool,
+        /// FIFO. Never blocks, never calls back into the transport/connection.
+        /// `parts` is borrowed for the call only; buffered bytes are copied.
+        /// Any error is terminal for the connection.
+        send: *const fn (*anyopaque, MessageParts) Error!void,
+
+        /// Next complete frame, or null if one isn't fully buffered yet.
+        /// Returned bytes are owned by the caller and freed with `allocator`;
+        /// they include the segment table (i.e. are directly usable by
+        /// `Message.fromOwnedBytes`).
+        receive: *const fn (*anyopaque, std.mem.Allocator) Error!?[]u8,
+
+        /// Try to push queued bytes to the peer.
+        flush: *const fn (*anyopaque) Error!void,
+
+        /// Where the caller's event loop should wait.
+        interest: *const fn (*anyopaque) Interest,
+
+        /// Optional: non-fd transports (threads, in-process) use this to wake
+        /// the loop when a frame becomes available.
+        setWaker: *const fn (*anyopaque, ?Waker) void,
+
+        /// Stop accepting sends, flush what's queued, then report error.Closed
+        /// from receive/flush.
+        shutdown: *const fn (*anyopaque) void,
+        /// Drop buffers immediately and report error.Closed.
+        close: *const fn (*anyopaque) void,
     };
 
     pub fn send(self: Transport, parts: MessageParts) anyerror!void {
-        return self.vtable.send(self, parts);
+        return self.vtable.send(self.context, parts);
     }
 
     pub fn receive(self: Transport, allocator: std.mem.Allocator) anyerror!?[]u8 {
-        return self.vtable.receive(self, allocator);
+        return self.vtable.receive(self.context, allocator);
     }
 
     pub fn flush(self: Transport) anyerror!void {
-        return self.vtable.flush(self);
+        return self.vtable.flush(self.context);
     }
 
     pub fn fd(self: Transport) std.posix.fd_t {
-        return self.vtable.fd(self);
+        return self.vtable.fd(self.context);
     }
 
     pub fn wantsWrite(self: Transport) bool {
-        return self.vtable.wantsWrite(self);
+        return self.vtable.wantsWrite(self.context);
     }
 
     pub fn isClosed(self: Transport) bool {
-        return self.vtable.isClosed(self);
+        return self.vtable.isClosed(self.context);
     }
 };

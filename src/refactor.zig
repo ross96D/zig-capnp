@@ -1589,8 +1589,7 @@ pub fn Refactor(comptime W: type) type {
             source: capnp.AnyPointerReader,
             doc: ?[]const u8,
         ) E!void {
-            var builder = capnp.MessageBuilder{ .allocator = ctx.allocator };
-            try builder.init();
+            var builder = try capnp.GrowableMessage.init(ctx.allocator, 65536);
             defer builder.deinit();
             try builder.initFromAnyPointer(source);
 
@@ -2113,7 +2112,7 @@ test "field" {
 
     writer.end = 0;
     try M.writeGetter(&ctx, struct_reader.discriminantOffset(), field, .reader, null);
-    try std.testing.expectEqualStrings("pub fn int32(self: @This()) i32 {\n    return self.reader.readIntField(i32, 0) ^ 0;\n}", writer.buffered());
+    try std.testing.expectEqualStrings("pub fn int32(self: @This()) i32 {\n    return self.reader.readIntField(i32, 0);\n}", writer.buffered());
 }
 
 test "compiler" {

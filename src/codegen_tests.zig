@@ -59,8 +59,7 @@ test "generated modules compile" {
 }
 
 test "generated primitive list round-trip" {
-    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer builder.deinit();
 
     var root = try builder.initRootStruct(lists.Lists.Builder, lists.Lists.builder_trait);
@@ -76,8 +75,7 @@ test "generated primitive list round-trip" {
 }
 
 test "generated composite list round-trip" {
-    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer builder.deinit();
 
     var root = try builder.initRootStruct(composite.Lists.Builder, composite.Lists.builder_trait);
@@ -103,8 +101,7 @@ test "generated composite list round-trip" {
 }
 
 test "generated union round-trip" {
-    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer builder.deinit();
 
     var root = try builder.initRootStruct(unions.UnionTestList.Builder, unions.UnionTestList.builder_trait);
@@ -131,8 +128,7 @@ test "generated union round-trip" {
 }
 
 test "generated defaults round-trip and fixture" {
-    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer builder.deinit();
 
     var root = try builder.initRootStruct(defaults.Defaults.Builder, defaults.Defaults.builder_trait);
@@ -152,8 +148,7 @@ test "generated defaults round-trip and fixture" {
 }
 
 test "generated text, data, enum, list, and defaults round-trip" {
-    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer builder.deinit();
 
     var root = try builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
@@ -192,8 +187,7 @@ test "generated text, data, enum, list, and defaults round-trip" {
 
 test "generated AnyPointer round-trip" {
     {
-        var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-        try builder.init();
+        var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
         defer builder.deinit();
 
         var root = try builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
@@ -205,8 +199,7 @@ test "generated AnyPointer round-trip" {
     }
 
     {
-        var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-        try builder.init();
+        var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
         defer builder.deinit();
 
         var root = try builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
@@ -220,8 +213,7 @@ test "generated AnyPointer round-trip" {
     }
 
     {
-        var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-        try builder.init();
+        var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
         defer builder.deinit();
 
         var root = try builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
@@ -239,8 +231,7 @@ test "generated AnyPointer round-trip" {
     }
 
     {
-        var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-        try builder.init();
+        var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
         defer builder.deinit();
 
         var root = try builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
@@ -262,8 +253,7 @@ test "generated AnyPointer round-trip" {
 }
 
 test "generated interface fields and pointer lists round-trip" {
-    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer builder.deinit();
 
     var root = try builder.initRootStruct(interfaces.InterfaceHolder.Builder, interfaces.InterfaceHolder.builder_trait);
@@ -285,8 +275,7 @@ test "generated interface fields and pointer lists round-trip" {
 }
 
 test "generated generic struct round-trip" {
-    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer builder.deinit();
 
     var root = try builder.initRootStruct(generics.Holder.Builder, generics.Holder.builder_trait);
@@ -387,8 +376,7 @@ test "generated typed interface client and server" {
 }
 
 test "generated groups round-trip" {
-    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer builder.deinit();
 
     var root = try builder.initRootStruct(groups.WithGroup.Builder, groups.WithGroup.builder_trait);
@@ -396,8 +384,7 @@ test "generated groups round-trip" {
     point.setX(10);
     point.setY(20);
 
-    var union_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try union_builder.init();
+    var union_builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer union_builder.deinit();
 
     var union_root = try union_builder.initRootStruct(groups.WithUnionGroup.Builder, groups.WithUnionGroup.builder_trait);
@@ -420,8 +407,7 @@ test "generated groups round-trip" {
 }
 
 test "generated non-union void setters compile and work" {
-    var builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer builder.deinit();
 
     var root = try builder.initRootStruct(void_setters.VoidFields.Builder, void_setters.VoidFields.builder_trait);
@@ -442,8 +428,7 @@ test "generated non-union void setters compile and work" {
 }
 
 test "generated struct copyFrom copies all field kinds" {
-    var src_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try src_builder.init();
+    var src_builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer src_builder.deinit();
 
     var src = try src_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
@@ -469,8 +454,7 @@ test "generated struct copyFrom copies all field kinds" {
     var src_message = src_builder.toReader();
     const src_reader = try src_message.getRootStruct(features.Features.Reader, features.Features.reader_trait);
 
-    var dst_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try dst_builder.init();
+    var dst_builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer dst_builder.deinit();
 
     var dst = try dst_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
@@ -501,8 +485,7 @@ test "generated struct copyFrom copies all field kinds" {
 }
 
 test "generated primitive list copyFrom" {
-    var src_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try src_builder.init();
+    var src_builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer src_builder.deinit();
 
     var src = try src_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
@@ -516,8 +499,7 @@ test "generated primitive list copyFrom" {
     var src_message = src_builder.toReader();
     const src_reader = try src_message.getRootStruct(features.Features.Reader, features.Features.reader_trait);
 
-    var dst_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try dst_builder.init();
+    var dst_builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer dst_builder.deinit();
 
     var dst = try dst_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
@@ -536,8 +518,7 @@ test "generated primitive list copyFrom" {
 }
 
 test "generated composite list copyFrom" {
-    var src_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try src_builder.init();
+    var src_builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer src_builder.deinit();
 
     var src = try src_builder.initRootStruct(composite.Lists.Builder, composite.Lists.builder_trait);
@@ -558,8 +539,7 @@ test "generated composite list copyFrom" {
     const src_reader = try src_message.getRootStruct(composite.Lists.Reader, composite.Lists.reader_trait);
 
     // Copy the whole struct (exercises the generic pointer/list copy path).
-    var whole_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try whole_builder.init();
+    var whole_builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer whole_builder.deinit();
 
     var whole = try whole_builder.initRootStruct(composite.Lists.Builder, composite.Lists.builder_trait);
@@ -574,8 +554,7 @@ test "generated composite list copyFrom" {
     try std.testing.expectEqual(@as(i16, 2022), whole_dates.get(1).year());
 
     // Copy just the composite list through CompositeListBuilder.copyFrom.
-    var list_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try list_builder.init();
+    var list_builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer list_builder.deinit();
 
     var list_root = try list_builder.initRootStruct(composite.Lists.Builder, composite.Lists.builder_trait);
@@ -590,8 +569,7 @@ test "generated composite list copyFrom" {
 }
 
 test "generated union and group copyFrom" {
-    var union_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try union_builder.init();
+    var union_builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer union_builder.deinit();
 
     var union_root = try union_builder.initRootStruct(unions.UnionTestList.Builder, unions.UnionTestList.builder_trait);
@@ -603,8 +581,7 @@ test "generated union and group copyFrom" {
     var union_message = union_builder.toReader();
     const union_reader = try union_message.getRootStruct(unions.UnionTestList.Reader, unions.UnionTestList.reader_trait);
 
-    var union_dst_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try union_dst_builder.init();
+    var union_dst_builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer union_dst_builder.deinit();
 
     var union_dst = try union_dst_builder.initRootStruct(unions.UnionTestList.Builder, unions.UnionTestList.builder_trait);
@@ -620,8 +597,7 @@ test "generated union and group copyFrom" {
 
     const group_reader = groups.pointTest();
 
-    var group_dst_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try group_dst_builder.init();
+    var group_dst_builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer group_dst_builder.deinit();
 
     var group_dst = try group_dst_builder.initRootStruct(groups.WithGroup.Builder, groups.WithGroup.builder_trait);
@@ -634,16 +610,14 @@ test "generated union and group copyFrom" {
 }
 
 test "generated builder copyFrom accepts asReader" {
-    var src_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try src_builder.init();
+    var src_builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer src_builder.deinit();
 
     var src = try src_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);
     try src.setName("from-builder");
     src.setOffset(99);
 
-    var dst_builder = capnp.MessageBuilder{ .allocator = std.testing.allocator };
-    try dst_builder.init();
+    var dst_builder = try capnp.GrowableMessage.init(std.testing.allocator, 65536);
     defer dst_builder.deinit();
 
     var dst = try dst_builder.initRootStruct(features.Features.Builder, features.Features.builder_trait);

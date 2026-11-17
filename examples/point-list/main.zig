@@ -5,8 +5,7 @@ const point = @import("point");
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
-    var builder = capnp.MessageBuilder{ .allocator = allocator };
-    try builder.init();
+    var builder = try capnp.GrowableMessage.init(allocator, 65536);
     defer builder.deinit();
 
     var polyline = try builder.initRootStruct(point.Polyline.Builder, point.Polyline.builder_trait);

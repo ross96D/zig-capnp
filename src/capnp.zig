@@ -122,9 +122,13 @@ pub const ReadContext = struct {
     }
 
     fn readWordAt(self: ReadContext, segment: u32, word: u32) Error!u64 {
+        // TODO maybe change this to a panic because maybe is best to keep read
+        // as an error free.
         if (segment >= self.segments.len) return Error.InvalidPointer;
         const seg = self.segments[segment];
         const pos: u64 = @as(u64, word) * 8;
+        // TODO maybe change this to a panic because maybe is best to keep read
+        // as an error free.
         if (pos + 8 > seg.len) return Error.OutOfBounds;
         return std.mem.readInt(u64, seg[@intCast(pos)..][0..8], .little);
     }
@@ -706,7 +710,7 @@ pub const StructBuilder = struct {
 
         return .{
             .context = .{
-                .segments = self.context.segments.*,
+                .segments = self.context.builder.segmentSlices(),
                 .segment = self.context.segment,
                 .offset_words = self.context.offset_words,
                 .traversal_counter = &self.context.builder.traversal_counter,
@@ -725,7 +729,7 @@ pub const StructBuilder = struct {
             const dst_start: usize = self.context.offsetBytes();
 
             const src = source.context.segments[source.context.segment][src_start..][0..bytes];
-            const dst = self.context.segments.*[self.context.segment][dst_start..][0..bytes];
+            const dst = self.context.builder.segments[self.context.segment][dst_start..][0..bytes];
 
             @memcpy(dst, src);
         }
@@ -733,7 +737,7 @@ pub const StructBuilder = struct {
         if (self.data_words > shared_data) {
             const start: usize = @as(usize, self.context.offsetBytes()) + @as(usize, shared_data) * 8;
             const bytes: usize = @as(usize, self.data_words - shared_data) * 8;
-            @memset(self.context.segments.*[self.context.segment][start..][0..bytes], 0);
+            @memset(self.context.builder.segments[self.context.segment][start..][0..bytes], 0);
         }
 
         for (0..self.ptr_words) |i| {
@@ -828,6 +832,88 @@ pub fn BuilderTrait(comptime T: type) type {
         /// Wrap a raw wire builder in the generated type-safe builder.
         builder: fn (StructBuilder) T,
     };
+}
+
+/// Size of the segment table for a framed message with `segment_count`
+/// segments, padded to a word boundary.
+pub fn frameHeaderSize(segment_count: usize) usize {
+    return std.mem.alignForward(usize, 4 * (segment_count + 1), 8);
+}
+
+/// Word count for one part of a compile-time message shape. Combine these with
+/// `framedSize`.
+pub const Size = struct {
+    words: usize,
+
+    pub fn ofStruct(comptime trait: anytype) Size {
+        return .{ .words = @as(usize, trait.data_words) + trait.ptr_words };
+    }
+
+    /// A composite list is a tag word followed by `count` elements.
+    pub fn ofCompositeList(comptime trait: anytype, comptime count: usize) Size {
+        const stride = @as(usize, trait.data_words) + trait.ptr_words;
+        return .{ .words = 1 + count * stride };
+    }
+
+    pub fn ofList(comptime T: type, comptime count: usize) Size {
+        return .{ .words = listWordCountComptime(listElementSize(T), count) };
+    }
+
+    /// Text is `len` bytes plus a NUL terminator.
+    pub fn ofText(comptime len: usize) Size {
+        return .{ .words = (len + 8) / 8 };
+    }
+
+    pub fn ofData(comptime len: usize) Size {
+        return .{ .words = (len + 7) / 8 };
+    }
+
+    pub fn ofWords(comptime count: usize) Size {
+        return .{ .words = count };
+    }
+};
+
+fn listWordCountComptime(comptime element_size: u3, comptime count: usize) usize {
+    return switch (element_size) {
+        0 => 0,
+        1 => (count + 63) / 64,
+        2 => (count + 7) / 8,
+        3 => (count + 3) / 4,
+        4 => (count + 1) / 2,
+        5, 6 => count,
+        7 => unreachable,
+    };
+}
+
+/// Compile-time size of a single-segment message containing the given parts,
+/// including the root pointer and the frame header. Every part must be a
+/// `Size`; the object graph must be fixed at compile time.
+pub fn framedSize(comptime parts: []const Size) usize {
+    var words: usize = 1; // root pointer
+    inline for (parts) |part| words += part.words;
+    return words * 8;
+}
+
+test "framedSize supports compile-time list shapes" {
+    const trait = .{ .data_words = 1, .ptr_words = 1 };
+
+    try std.testing.expectEqual(@as(usize, 8 + 8 * (1 + 2)), framedSize(.{Size.ofStruct(trait)}));
+    try std.testing.expectEqual(@as(usize, 8 + 8 * (1 + 2 + 3)), framedSize(.{
+        Size.ofStruct(trait),
+        Size.ofCompositeList(trait, 1),
+    }));
+
+    try std.testing.expectEqual(@as(usize, 0), Size.ofList(void, 100).words);
+    try std.testing.expectEqual(@as(usize, 1), Size.ofList(bool, 64).words);
+    try std.testing.expectEqual(@as(usize, 2), Size.ofList(bool, 65).words);
+    try std.testing.expectEqual(@as(usize, 2), Size.ofList(u8, 9).words);
+    try std.testing.expectEqual(@as(usize, 4), Size.ofList(u32, 8).words);
+    try std.testing.expectEqual(@as(usize, 8), Size.ofList(u64, 8).words);
+    try std.testing.expectEqual(@as(usize, 1), Size.ofText(0).words);
+    try std.testing.expectEqual(@as(usize, 2), Size.ofText(8).words);
+    try std.testing.expectEqual(@as(usize, 1), Size.ofData(8).words);
+    try std.testing.expectEqual(@as(usize, 2), Size.ofData(9).words);
+    try std.testing.expectEqual(@as(usize, 3), Size.ofWords(3).words);
 }
 
 pub const Struct = struct {
@@ -984,7 +1070,7 @@ pub fn ListBuilder(comptime T: type) type {
             const dst_start: usize = dst.offsetBytes();
 
             const src = source.context.segments[source.context.segment][src_start..][0..bytes];
-            const dest = dst.segments.*[dst.segment][dst_start..][0..bytes];
+            const dest = dst.builder.segments[dst.segment][dst_start..][0..bytes];
 
             @memcpy(dest, src);
         }
@@ -1353,9 +1439,9 @@ pub const Message = struct {
 
 pub const BuildContext = struct {
     builder: *MessageBuilder,
-    segments: *[][]u8,
     segment: u32,
     offset_words: u29,
+    grower: ?*Grower = null,
 
     pub fn offsetBytes(self: BuildContext) u32 {
         return self.offset_words << 3;
@@ -1363,17 +1449,20 @@ pub const BuildContext = struct {
 
     pub fn readIntWithBound(self: BuildContext, comptime T: type, offset: u32, boundWords: u29) T {
         const pos = self.offsetBytes() + @sizeOf(T) * offset;
-        return if (@sizeOf(T) * offset < boundWords << 3) std.mem.readInt(T, self.segments.*[self.segment][pos..][0..@sizeOf(T)], .little) else 0;
+        const segment = self.builder.segments[self.segment];
+        return if (@sizeOf(T) * offset < boundWords << 3) std.mem.readInt(T, segment[pos..][0..@sizeOf(T)], .little) else 0;
     }
 
     pub fn readInt(self: BuildContext, comptime T: type, offset: u32) T {
         const pos = self.offsetBytes() + @sizeOf(T) * offset;
-        return std.mem.readInt(T, self.segments.*[self.segment][pos..][0..@sizeOf(T)], .little);
+        const segment = self.builder.segments[self.segment];
+        return std.mem.readInt(T, segment[pos..][0..@sizeOf(T)], .little);
     }
 
     pub fn writeInt(self: BuildContext, comptime T: type, offset: u32, value: T) void {
         const pos = self.offsetBytes() + @sizeOf(T) * offset;
-        return std.mem.writeInt(T, self.segments.*[self.segment][pos..][0..@sizeOf(T)], value, .little);
+        const segment = self.builder.segments[self.segment];
+        return std.mem.writeInt(T, segment[pos..][0..@sizeOf(T)], value, .little);
     }
 
     pub fn writePtr(self: *BuildContext, ptr: Ptr) void {
@@ -1453,27 +1542,17 @@ fn writeObjectPointer(pointer: *BuildContext, object: Object, payload: Ptr) Buil
     } });
 }
 
-pub const MessageBuilder = struct {
+pub const max_segments: usize = 4;
+
+/// Allocation policy for builders that need to grow past their initial
+/// storage. `MessageBuilder` itself never allocates; the policy is passed
+/// explicitly through the build context.
+pub const Grower = struct {
     allocator: Allocator,
     // Capacity for the next new segment. Grows geometrically, capped at max_segment_bytes.
     next_segment_bytes: u32 = 1 << 16,
-    segment_store: [16][]u8 = std.mem.zeroes([16][]u8),
-    segment_capacity: [16]u32 = std.mem.zeroes([16]u32),
-    segments: [][]u8 = std.mem.zeroes([][]u8),
-    traversal_counter: Counter = Counter{ .limit = 8 * 1024 * 1024 },
 
-    pub fn init(self: *MessageBuilder) BuildError!void {
-        self.traversal_counter = Counter{ .limit = 8 * 1024 * 1024 };
-        _ = try self.expandAssert(1);
-    }
-
-    inline fn segmentCapacity(self: MessageBuilder, segment: u32) u32 {
-        return self.segment_capacity[segment];
-    }
-
-    pub fn expandAssert(self: *MessageBuilder, min_bytes: u32) BuildError!u32 {
-        const len: u32 = @intCast(self.segments.len);
-        if (len == self.segment_capacity.len) return Error.SegmentLimitReached;
+    pub fn grow(self: *Grower, min_bytes: u32) BuildError![]u8 {
         if (min_bytes > max_segment_bytes) return Error.MessageTooLarge;
 
         var capacity: u32 = self.next_segment_bytes;
@@ -1483,40 +1562,100 @@ pub const MessageBuilder = struct {
         if (capacity > max_segment_bytes) capacity = max_segment_bytes;
         if (capacity < min_bytes) return Error.MessageTooLarge;
 
-        self.segment_store[len] = try self.allocator.alloc(u8, capacity);
-        self.segment_store[len].len = 0;
-        self.segment_capacity[len] = capacity;
+        const segment = try self.allocator.alloc(u8, capacity);
         self.next_segment_bytes = @min(std.math.mul(u32, capacity, 2) catch max_segment_bytes, max_segment_bytes);
-        self.segments = self.segment_store[0 .. len + 1];
-        return len;
+        return segment;
+    }
+};
+
+/// A message builder backed exclusively by caller-provided storage. It owns no
+/// memory and never allocates. Use `GrowableMessage` when the message may need
+/// to grow beyond its initial buffer.
+pub const MessageBuilder = struct {
+    segments: [max_segments][]u8 = std.mem.zeroes([max_segments][]u8),
+    capacities: [max_segments]u32 = std.mem.zeroes([max_segments]u32),
+    count: u8 = 0,
+    traversal_counter: Counter = Counter{ .limit = 8 * 1024 * 1024 },
+
+    pub fn initBuffer(buffer: []u8) MessageBuilder {
+        var self = MessageBuilder{};
+        self.addSegment(buffer);
+        return self;
     }
 
-    pub fn allocAssert(self: *MessageBuilder, segment: u32, bytes: u32) BuildContext {
-        std.debug.assert(segment < self.segments.len);
+    pub fn initSegments(buffers: []const []u8) BuildError!MessageBuilder {
+        if (buffers.len > max_segments) return Error.SegmentLimitReached;
+        var self = MessageBuilder{};
+        for (buffers) |buffer| self.addSegment(buffer);
+        return self;
+    }
+
+    pub fn deinitSegments(self: *MessageBuilder, allocator: std.mem.Allocator) void {
+        for (self.segments[0..self.count], 0..) |segment, i| {
+            allocator.free(segment.ptr[0..self.capacities[i]]);
+        }
+        self.count = 0;
+    }
+
+    fn addSegment(self: *MessageBuilder, buffer: []u8) void {
+        std.debug.assert(self.count < max_segments);
+        const usable = buffer.len - (buffer.len % 8);
+        self.segments[self.count] = buffer[0..0];
+        self.capacities[self.count] = @intCast(usable);
+        self.count += 1;
+    }
+
+    /// Reset the used length of every segment. `GrowableMessage.reset` also
+    /// frees segments grown beyond the first one.
+    pub fn reset(self: *MessageBuilder) void {
+        for (self.segments[0..self.count]) |*segment| segment.len = 0;
+        self.traversal_counter = Counter{ .limit = 8 * 1024 * 1024 };
+    }
+
+    inline fn segmentCapacity(self: *const MessageBuilder, segment: u32) u32 {
+        return self.capacities[segment];
+    }
+
+    pub fn expandAssert(self: *MessageBuilder, min_bytes: u32, grower: ?*Grower) BuildError!u32 {
+        if (self.count >= max_segments) return Error.SegmentLimitReached;
+        if (min_bytes > max_segment_bytes) return Error.MessageTooLarge;
+        const g = grower orelse return Error.NoSpaceLeft;
+
+        const segment = try g.grow(min_bytes);
+        self.addSegment(segment);
+        return self.count - 1;
+    }
+
+    pub fn allocAssert(self: *MessageBuilder, segment: u32, bytes: u32, grower: ?*Grower) BuildContext {
+        std.debug.assert(segment < self.count);
         std.debug.assert(@as(u64, self.segments[segment].len) + bytes <= self.segmentCapacity(segment));
 
         defer self.segments[segment].len += bytes;
         const seg = self.segments[segment];
         @memset(seg.ptr[seg.len .. seg.len + bytes], 0);
-        return .{ .builder = self, .segments = &self.segments, .segment = segment, .offset_words = @intCast(seg.len >> 3) };
+        return .{ .builder = self, .segment = segment, .offset_words = @intCast(seg.len >> 3), .grower = grower };
     }
 
     /// try to allocate in the given segment.
     pub fn alloc(self: *MessageBuilder, segment: u32, words: u32) BuildError!BuildContext {
+        return self.allocWithGrower(segment, words, null);
+    }
+
+    pub fn allocWithGrower(self: *MessageBuilder, segment: u32, words: u32, grower: ?*Grower) BuildError!BuildContext {
         const bytes: u32 = std.math.mul(u32, words, 8) catch return Error.MessageTooLarge;
         if (bytes > max_segment_bytes) return Error.MessageTooLarge;
 
-        if (segment < self.segments.len) {
+        if (segment < self.count) {
             const used: u64 = self.segments[segment].len;
             if (used + bytes <= self.segmentCapacity(segment)) {
-                return self.allocAssert(segment, bytes);
+                return self.allocAssert(segment, bytes, grower);
             }
         }
 
         var best_ix: u32 = 0;
         var best_spare: i64 = -1;
 
-        for (self.segments, 0..) |seg, n_| {
+        for (self.segments[0..self.count], 0..) |seg, n_| {
             const n: u32 = @intCast(n_);
             if (n == segment) continue;
 
@@ -1530,11 +1669,11 @@ pub const MessageBuilder = struct {
         }
 
         if (best_spare < 0) {
-            const new_segment = try self.expandAssert(bytes);
-            return self.allocAssert(new_segment, bytes);
+            const new_segment = try self.expandAssert(bytes, grower);
+            return self.allocAssert(new_segment, bytes, grower);
         }
 
-        return self.allocAssert(best_ix, bytes);
+        return self.allocAssert(best_ix, bytes, grower);
     }
 
     fn allocObject(self: *MessageBuilder, pointer: BuildContext, words: u32) BuildError!Object {
@@ -1542,12 +1681,12 @@ pub const MessageBuilder = struct {
         if (bytes > max_segment_bytes) return Error.MessageTooLarge;
 
         // Prefer placing the object in the pointer's own segment.
-        if (pointer.segment < self.segments.len) {
+        if (pointer.segment < self.count) {
             const used: u64 = self.segments[pointer.segment].len;
             if (used + bytes <= self.segmentCapacity(pointer.segment)) {
                 return .{
                     .tag = pointer,
-                    .content = self.allocAssert(pointer.segment, bytes),
+                    .content = self.allocAssert(pointer.segment, bytes, pointer.grower),
                     .needs_far = false,
                 };
             }
@@ -1555,7 +1694,7 @@ pub const MessageBuilder = struct {
 
         // Reserve [landing pad][payload] contiguously in another segment.
         const padded_words = std.math.add(u32, words, 1) catch return Error.MessageTooLarge;
-        const start = try self.alloc(pointer.segment, padded_words);
+        const start = try self.allocWithGrower(pointer.segment, padded_words, pointer.grower);
 
         var content = start;
         content.offset_words += 1;
@@ -1567,43 +1706,41 @@ pub const MessageBuilder = struct {
         };
     }
 
-    pub fn deinit(self: *MessageBuilder) void {
-        for (self.segments, 0..) |*segment, n| {
-            segment.len = self.segmentCapacity(@as(u32, @intCast(n)));
-            self.allocator.free(segment.*);
-        }
-    }
-
     /// Borrow the builder's segments as a readable message. The returned
     /// message is valid only while this builder is alive and must not be
     /// deinitialized.
-    pub fn toReader(self: MessageBuilder) Message {
-        return Message{ .segments = self.segments };
+    pub fn toReader(self: *const MessageBuilder) Message {
+        return Message{ .segments = @constCast(self.segments[0..self.count]) };
     }
 
     /// Exact size of the framed serialized message.
-    pub fn serializedSize(self: MessageBuilder) Error!usize {
-        const segment_count = self.segments.len;
+    pub fn serializedSize(self: *const MessageBuilder) usize {
+        const segment_count = self.count;
         const table_bytes = 4 * (segment_count + 1);
         const header_size = std.mem.alignForward(usize, table_bytes, 8);
 
         var total: usize = header_size;
-        for (self.segments) |segment| {
-            total = std.math.add(usize, total, segment.len) catch return Error.MessageTooLarge;
+        for (self.segments[0..self.count]) |segment| {
+            total = std.math.add(usize, total, segment.len) catch std.debug.panic("mult overflow {} {}", .{ total, segment.len });
         }
         return total;
     }
 
     /// Borrow the builder's segment bytes. The slices are valid only while
     /// this builder is alive and must not be written through.
-    pub fn segmentSlices(self: MessageBuilder) []const []const u8 {
-        return self.segments;
+    pub fn segmentSlices(self: *const MessageBuilder) []const []const u8 {
+        return @as([*]const []const u8, @ptrCast(self.segments[0..self.count].ptr))[0..self.count];
+    }
+
+    /// Number of segments currently in use.
+    pub fn segmentCount(self: *const MessageBuilder) usize {
+        return self.count;
     }
 
     /// Write the framed message header into `buffer` and return the used
     /// header slice.
-    pub fn writeHeader(self: MessageBuilder, buffer: []u8) Error![]const u8 {
-        const segment_count = self.segments.len;
+    pub fn writeHeader(self: *const MessageBuilder, buffer: []u8) Error![]const u8 {
+        const segment_count = self.count;
         std.debug.assert(segment_count > 0);
 
         const table_bytes = 4 * (segment_count + 1);
@@ -1613,7 +1750,7 @@ pub const MessageBuilder = struct {
         std.mem.writeInt(u32, buffer[0..4], @intCast(segment_count - 1), .little);
 
         var offset: usize = 4;
-        for (self.segments) |segment| {
+        for (self.segments[0..self.count]) |segment| {
             std.debug.assert(segment.len % 8 == 0);
             std.mem.writeInt(u32, buffer[offset..][0..4], @intCast(segment.len / 8), .little);
             offset += 4;
@@ -1624,13 +1761,13 @@ pub const MessageBuilder = struct {
     }
 
     /// Serialize into caller-provided storage. Returns the written slice.
-    pub fn writeToBuffer(self: MessageBuilder, buffer: []u8) Error![]u8 {
+    pub fn writeToBuffer(self: *const MessageBuilder, buffer: []u8) Error![]u8 {
         const total = try self.serializedSize();
         if (buffer.len < total) return Error.NoSpaceLeft;
 
         const header = try self.writeHeader(buffer);
         var offset: usize = header.len;
-        for (self.segments) |segment| {
+        for (self.segments[0..self.count]) |segment| {
             @memcpy(buffer[offset..][0..segment.len], segment);
             offset += segment.len;
         }
@@ -1638,29 +1775,29 @@ pub const MessageBuilder = struct {
         return buffer[0..offset];
     }
 
-    pub fn writeTo(self: MessageBuilder, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-        const segment_count = self.segments.len;
-        std.debug.assert(segment_count > 0);
+    // pub fn writeTo(self: *const MessageBuilder, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    //     const segment_count = self.count;
+    //     std.debug.assert(segment_count > 0);
 
-        var buf: [4]u8 = undefined;
-        std.mem.writeInt(u32, &buf, @intCast(segment_count - 1), .little);
-        try writer.writeAll(&buf);
+    //     var buf: [4]u8 = undefined;
+    //     std.mem.writeInt(u32, &buf, @intCast(segment_count - 1), .little);
+    //     try writer.writeAll(&buf);
 
-        for (self.segments) |segment| {
-            std.debug.assert(segment.len % 8 == 0);
-            std.mem.writeInt(u32, &buf, @intCast(segment.len / 8), .little);
-            try writer.writeAll(&buf);
-        }
+    //     for (self.segments[0..self.count]) |segment| {
+    //         std.debug.assert(segment.len % 8 == 0);
+    //         std.mem.writeInt(u32, &buf, @intCast(segment.len / 8), .little);
+    //         try writer.writeAll(&buf);
+    //     }
 
-        // Pad the segment table to a word boundary.
-        const table_bytes = 4 * (segment_count + 1);
-        var padding = (8 - (table_bytes % 8)) % 8;
-        while (padding > 0) : (padding -= 1) try writer.writeByte(0);
+    //     // Pad the segment table to a word boundary.
+    //     const table_bytes = 4 * (segment_count + 1);
+    //     var padding = (8 - (table_bytes % 8)) % 8;
+    //     while (padding > 0) : (padding -= 1) try writer.writeByte(0);
 
-        for (self.segments) |segment| try writer.writeAll(segment);
-    }
+    //     for (self.segments[0..self.count]) |segment| try writer.writeAll(segment);
+    // }
 
-    pub fn writePackedTo(self: MessageBuilder, writer: *std.Io.Writer, scratch: []u8) !void {
+    pub fn writePackedTo(self: *const MessageBuilder, writer: *std.Io.Writer, scratch: []u8) !void {
         const bytes = try self.writeToBuffer(scratch);
         try packing.pack(writer, bytes);
     }
@@ -1679,7 +1816,7 @@ pub const MessageBuilder = struct {
             const dst_start: usize = dest.offsetBytes();
 
             const src = source.segments[source.segment][src_start..][0..bytes];
-            const dst = dest.segments.*[dest.segment][dst_start..][0..bytes];
+            const dst = dest.builder.segments[dest.segment][dst_start..][0..bytes];
             @memcpy(dst, src);
         }
         for (0..ptr_words) |i| {
@@ -1745,7 +1882,7 @@ pub const MessageBuilder = struct {
             const dst_start: usize = object.content.offsetBytes();
 
             const src = source.segments[source.segment][src_start..][0..bytes];
-            const dst = object.content.segments.*[object.content.segment][dst_start..][0..bytes];
+            const dst = object.content.builder.segments[object.content.segment][dst_start..][0..bytes];
             @memcpy(dst, src);
         }
     }
@@ -1792,17 +1929,104 @@ pub const MessageBuilder = struct {
     }
 
     pub fn initFromAnyPointer(self: *MessageBuilder, source: AnyPointerReader) BuildError!void {
-        if (self.segments.len != 1 or self.segments[0].len != 0) return Error.RootAlreadyInitialized;
-        var root = self.allocAssert(0, 8);
+        return self.initFromAnyPointerWithGrower(source, null);
+    }
+
+    pub fn initFromAnyPointerWithGrower(self: *MessageBuilder, source: AnyPointerReader, grower: ?*Grower) BuildError!void {
+        if (self.count != 1 or self.segments[0].len != 0) return Error.RootAlreadyInitialized;
+        var root = self.allocAssert(0, 8, grower);
         try self.copyPointerTo(&root, source);
     }
 
     pub fn initRootStruct(self: *MessageBuilder, comptime T: type, comptime trait: BuilderTrait(T)) BuildError!T {
-        if (self.segments.len != 1 or self.segments[0].len != 0) return Error.RootAlreadyInitialized;
+        return self.initRootStructWithGrower(T, trait, null);
+    }
+
+    pub fn initRootStructWithGrower(self: *MessageBuilder, comptime T: type, comptime trait: BuilderTrait(T), grower: ?*Grower) BuildError!T {
+        if (self.count != 1 or self.segments[0].len != 0) return Error.RootAlreadyInitialized;
 
         // The root pointer must be segment 0, word 0.
-        var ctx = self.allocAssert(0, 8);
+        var ctx = self.allocAssert(0, 8, grower);
         return trait.builder(try ctx.allocStruct(trait.data_words, trait.ptr_words));
+    }
+};
+
+/// A message builder that owns its segments and can grow on demand. Use this
+/// when the final message size is not known up front. It will use
+/// `next_segment_bytes` as the initial capacity and for each new segment.
+pub const GrowableMessage = struct {
+    builder: MessageBuilder,
+    grower: Grower,
+
+    pub fn init(allocator: Allocator, initial_bytes: u32) BuildError!GrowableMessage {
+        var grower = Grower{ .allocator = allocator, .next_segment_bytes = initial_bytes };
+        const first = try grower.grow(8);
+        return .{
+            .builder = MessageBuilder.initBuffer(first),
+            .grower = grower,
+        };
+    }
+
+    pub fn deinit(self: *GrowableMessage) void {
+        self.builder.deinitSegments(self.grower.allocator);
+    }
+
+    pub fn reset(self: *GrowableMessage) void {
+        if (self.builder.count == 0) return;
+        for (self.builder.segments[1..self.builder.count], 1..) |segment, i| {
+            self.grower.allocator.free(segment.ptr[0..self.builder.capacities[i]]);
+        }
+        self.builder.count = 1;
+        self.builder.segments[0].len = 0;
+        self.builder.traversal_counter = Counter{ .limit = 8 * 1024 * 1024 };
+    }
+
+    pub fn initRootStruct(self: *GrowableMessage, comptime T: type, comptime trait: BuilderTrait(T)) BuildError!T {
+        return self.builder.initRootStructWithGrower(T, trait, &self.grower);
+    }
+
+    pub fn initFromAnyPointer(self: *GrowableMessage, source: AnyPointerReader) BuildError!void {
+        return self.builder.initFromAnyPointerWithGrower(source, &self.grower);
+    }
+
+    pub fn alloc(self: *GrowableMessage, segment: u32, words: u32) BuildError!BuildContext {
+        return self.builder.allocWithGrower(segment, words, &self.grower);
+    }
+
+    pub fn allocAssert(self: *GrowableMessage, segment: u32, bytes: u32) BuildContext {
+        return self.builder.allocAssert(segment, bytes, &self.grower);
+    }
+
+    pub fn toReader(self: *const GrowableMessage) Message {
+        return self.builder.toReader();
+    }
+
+    pub fn serializedSize(self: *const GrowableMessage) usize {
+        return self.builder.serializedSize();
+    }
+
+    pub fn segmentSlices(self: *const GrowableMessage) []const []const u8 {
+        return self.builder.segmentSlices();
+    }
+
+    pub fn segmentCount(self: *const GrowableMessage) usize {
+        return self.builder.segmentCount();
+    }
+
+    pub fn writeHeader(self: *const GrowableMessage, buffer: []u8) Error![]const u8 {
+        return self.builder.writeHeader(buffer);
+    }
+
+    pub fn writeToBuffer(self: *const GrowableMessage, buffer: []u8) Error![]u8 {
+        return self.builder.writeToBuffer(buffer);
+    }
+
+    // pub fn writeTo(self: *const GrowableMessage, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    //     return self.builder.writeTo(writer);
+    // }
+
+    pub fn writePackedTo(self: *const GrowableMessage, writer: *std.Io.Writer, scratch: []u8) !void {
+        return self.builder.writePackedTo(writer, scratch);
     }
 };
 
@@ -1814,43 +2038,75 @@ pub fn getStaticRoot(comptime T: type, segments: []const []const u8) Error!T {
 }
 
 test "test MessageBuilder" {
-    var builder = MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
+    var builder = try GrowableMessage.init(std.testing.allocator, 1 << 16);
     defer builder.deinit();
-    try std.testing.expectEqual(@as(usize, 1), builder.segments.len);
+    try std.testing.expectEqual(@as(usize, 1), builder.segmentCount());
 
     {
         const context = try builder.alloc(0, 1024);
         try std.testing.expectEqual(@as(u32, 0), context.segment);
         try std.testing.expectEqual(@as(u32, 0), context.offset_words);
-        try std.testing.expectEqual(@as(usize, 8192), context.segments.*[0].len);
+        try std.testing.expectEqual(@as(usize, 8192), context.builder.segments[0].len);
     }
 
     {
         const context = try builder.alloc(0, 1024);
         try std.testing.expectEqual(@as(u32, 0), context.segment);
         try std.testing.expectEqual(@as(u32, 1024), context.offset_words);
-        try std.testing.expectEqual(@as(usize, 16384), context.segments.*[0].len);
+        try std.testing.expectEqual(@as(usize, 16384), context.builder.segments[0].len);
     }
 
     {
         const context = try builder.alloc(0, 8192 * 2);
         try std.testing.expectEqual(@as(u32, 1), context.segment);
         try std.testing.expectEqual(@as(u32, 0), context.offset_words);
-        try std.testing.expectEqual(@as(usize, 8192 * 2 * 8), context.segments.*[1].len);
+        try std.testing.expectEqual(@as(usize, 8192 * 2 * 8), context.builder.segments[1].len);
     }
 
     {
         const context = try builder.alloc(1, 1024);
         try std.testing.expectEqual(@as(u32, 0), context.segment);
         try std.testing.expectEqual(@as(u32, 2048), context.offset_words);
-        try std.testing.expectEqual(@as(usize, 8192 * 3), context.segments.*[0].len);
+        try std.testing.expectEqual(@as(usize, 8192 * 3), context.builder.segments[0].len);
     }
 }
 
+test "MessageBuilder builds into caller-provided storage" {
+    var storage: [64]u8 align(8) = undefined;
+    var builder = MessageBuilder.initBuffer(&storage);
+
+    const context = try builder.alloc(0, 4);
+    try std.testing.expectEqual(@as(u32, 0), context.segment);
+    try std.testing.expectEqual(@as(usize, 32), builder.segments[0].len);
+    try std.testing.expectEqual(@as(usize, 1), builder.segmentCount());
+
+    builder.reset();
+    try std.testing.expectEqual(@as(usize, 0), builder.segments[0].len);
+}
+
+test "fixed MessageBuilder rejects overflow" {
+    var storage: [8]u8 align(8) = undefined;
+    var builder = MessageBuilder.initBuffer(&storage);
+
+    _ = try builder.alloc(0, 1);
+    try std.testing.expectError(error.NoSpaceLeft, builder.alloc(0, 1));
+}
+
+test "GrowableMessage reset reuses the initial segment" {
+    var builder = try GrowableMessage.init(std.testing.allocator, 1024);
+    defer builder.deinit();
+
+    _ = try builder.alloc(0, 8);
+    _ = try builder.alloc(0, 1024);
+    try std.testing.expectEqual(@as(usize, 2), builder.segmentCount());
+
+    builder.reset();
+    try std.testing.expectEqual(@as(usize, 1), builder.segmentCount());
+    try std.testing.expectEqual(@as(usize, 0), builder.builder.segments[0].len);
+}
+
 test "Message.fromOwnedBytes takes ownership" {
-    var builder = MessageBuilder{ .allocator = std.testing.allocator };
-    try builder.init();
+    var builder = try GrowableMessage.init(std.testing.allocator, 1024);
     defer builder.deinit();
 
     _ = try builder.alloc(0, 2);
@@ -1862,7 +2118,7 @@ test "Message.fromOwnedBytes takes ownership" {
     defer message.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(@as(usize, 1), message.segments.len);
-    try std.testing.expectEqual(builder.segments[0].len, message.segments[0].len);
+    try std.testing.expectEqual(builder.builder.segments[0].len, message.segments[0].len);
 }
 
 test "capnp struct sizes" {

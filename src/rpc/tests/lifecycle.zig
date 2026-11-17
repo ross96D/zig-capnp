@@ -19,7 +19,7 @@ const scriptedPump = support.scriptedPump;
 const scriptedBootstrap = support.scriptedBootstrap;
 const messageIsReturnException = support.messageIsReturnException;
 
-fn serializeMessage(message: capnp.MessageBuilder) ![]u8 {
+fn serializeMessage(message: anytype) ![]u8 {
     const size = try message.serializedSize();
     const bytes = try testing.allocator.alloc(u8, size);
     errdefer testing.allocator.free(bytes);
@@ -28,8 +28,7 @@ fn serializeMessage(message: capnp.MessageBuilder) ![]u8 {
 }
 
 fn buildResolve(promise_id: u32, target_id: u32) ![]u8 {
-    var message = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try message.init();
+    var message = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer message.deinit();
 
     var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
@@ -140,8 +139,7 @@ test "unsupported messages abort the connection" {
     const client = try connection.Connection.init(testing.allocator, loopback.endpoint(.client));
     defer client.deinit();
 
-    var message = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try message.init();
+    var message = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer message.deinit();
 
     var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
@@ -447,8 +445,7 @@ test "scripted transport: duplicate questions and unknown exports are rejected" 
     try testing.expectEqual(@as(usize, 1), exception_count);
 
     // An unknown imported capability id must also return an exception.
-    var message = capnp.MessageBuilder{ .allocator = testing.allocator };
-    try message.init();
+    var message = try capnp.GrowableMessage.init(testing.allocator, 65536);
     defer message.deinit();
 
     var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
