@@ -1,4 +1,5 @@
-//! Stateless builders for the small RPC control messages.
+//! Stateless builders for the small RPC control messages, plus the
+//! `MessageParts` view used to hand serialized messages to transports.
 //!
 //! Messages with a fixed shape can be built directly into caller-provided
 //! storage. Variable-length messages (abort / exception) use a
@@ -10,6 +11,55 @@ const rpc = @import("generated/rpc.zig");
 
 const message_initial_segment_bytes: u32 = 1024;
 const header_bytes = capnp.frameHeaderSize(1);
+
+/// A serialized message split into its header (segment table) and segment
+/// payloads.
+///
+/// Concatenating `header` and `segments` yields exactly one framed Cap'n Proto
+/// message, as consumed by `capnp.Message.fromOwnedBytes`. Transports may write
+/// the parts directly (e.g. `writev` or a queue append) without first
+/// flattening them into a single allocation.
+pub const MessageParts = struct {
+    header: []const u8,
+    segments: []const []const u8 = &.{},
+
+    pub fn serializedSize(self: MessageParts) !usize {
+        var total: usize = self.header.len;
+        for (self.segments) |segment| {
+            total = std.math.add(usize, total, segment.len) catch return error.MessageTooLarge;
+        }
+        return total;
+    }
+
+    /// Flatten the parts into a newly allocated buffer.
+    pub fn toOwnedBytes(self: MessageParts, allocator: std.mem.Allocator) ![]u8 {
+        const total = try self.serializedSize();
+        const bytes = try allocator.alloc(u8, total);
+        errdefer allocator.free(bytes);
+
+        @memcpy(bytes[0..self.header.len], self.header);
+        var offset: usize = self.header.len;
+        for (self.segments) |segment| {
+            @memcpy(bytes[offset..][0..segment.len], segment);
+            offset += segment.len;
+        }
+        return bytes;
+    }
+
+    /// Write into caller-provided storage.
+    pub fn writeToBuffer(self: MessageParts, buffer: []u8) ![]u8 {
+        const total = try self.serializedSize();
+        if (buffer.len < total) return error.NoSpaceLeft;
+
+        @memcpy(buffer[0..self.header.len], self.header);
+        var offset: usize = self.header.len;
+        for (self.segments) |segment| {
+            @memcpy(buffer[offset..][0..segment.len], segment);
+            offset += segment.len;
+        }
+        return buffer[0..offset];
+    }
+};
 
 /// Exact framed sizes of the fixed-shape control messages.
 pub const finish_size = capnp.framedSize(&[_]capnp.Size{

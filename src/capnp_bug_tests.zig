@@ -49,8 +49,8 @@ fn farPointer(segment: u32, offset_words: u29, double: bool) u64 {
     });
 }
 
-fn readContext(segments: [][]u8, counter: *capnp.Counter) capnp.ReadContext {
-    return capnp.ReadContext.fromSegments(segments, counter);
+fn readContext(segments: [][]u8) capnp.ReadContext {
+    return capnp.ReadContext.fromSegments(segments);
 }
 
 /// Accepts any library error. Used where the exact error kind is an API choice.

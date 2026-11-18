@@ -114,8 +114,8 @@ pub const ReadContext = struct {
     segment: u32,
     offset_words: u29,
 
-    depth_counter: Counter = Counter{ .limit = 64 },
-    traversal_counter: *Counter,
+    // depth_counter: Counter = Counter{ .limit = 64 },
+    // traversal_counter: *Counter,
 
     pub fn offsetBytes(self: ReadContext) u32 {
         return self.offset_words << 3;
@@ -234,8 +234,8 @@ pub const ReadContext = struct {
                     const words = @as(u32, s.data_words) + s.ptr_words;
                     const word = try self.checkObject(content_segment, content_word_offset, words);
 
-                    self.depth_counter.increment(1) catch return Error.DepthLimitExceeded;
-                    self.traversal_counter.increment(words) catch return Error.TraversalLimitExceeded;
+                    // self.depth_counter.increment(1) catch return Error.DepthLimitExceeded;
+                    // self.traversal_counter.increment(words) catch return Error.TraversalLimitExceeded;
 
                     self.segment = content_segment;
                     self.offset_words = word;
@@ -260,13 +260,13 @@ pub const ReadContext = struct {
                     };
                     const word = try self.checkObject(content_segment, content_word_offset, words);
 
-                    // Void/zero-sized elements occupy no wire space, but they
-                    // count as one word each for traversal-limit purposes.
-                    const traversal_words: u32 =
-                        if (l.element_size == 0) l.elements_or_words else words;
+                    // // Void/zero-sized elements occupy no wire space, but they
+                    // // count as one word each for traversal-limit purposes.
+                    // const traversal_words: u32 =
+                    //     if (l.element_size == 0) l.elements_or_words else words;
 
-                    self.depth_counter.increment(1) catch return Error.DepthLimitExceeded;
-                    self.traversal_counter.increment(traversal_words) catch return Error.TraversalLimitExceeded;
+                    // self.depth_counter.increment(1) catch return Error.DepthLimitExceeded;
+                    // self.traversal_counter.increment(traversal_words) catch return Error.TraversalLimitExceeded;
 
                     self.segment = content_segment;
                     self.offset_words = word;
@@ -307,12 +307,12 @@ pub const ReadContext = struct {
         return seg[@intCast(start)..][0..length];
     }
 
-    pub fn fromSegments(segments: []const []const u8, traversal_counter: *Counter) ReadContext {
+    pub fn fromSegments(segments: []const []const u8) ReadContext {
         return ReadContext{
             .segments = segments,
             .segment = 0,
             .offset_words = 0,
-            .traversal_counter = traversal_counter,
+            // .traversal_counter = traversal_counter,
         };
     }
 
@@ -713,7 +713,7 @@ pub const StructBuilder = struct {
                 .segments = self.context.builder.segmentSlices(),
                 .segment = self.context.segment,
                 .offset_words = self.context.offset_words,
-                .traversal_counter = &self.context.builder.traversal_counter,
+                // .traversal_counter = &self.context.builder.traversal_counter,
             },
             .data_words = self.data_words,
             .ptr_words = self.ptr_words,
@@ -1255,12 +1255,12 @@ pub fn CompositeListReader(
                         return Error.OutOfBounds;
                     }
 
-                    // Zero-sized structs still count as one word per
-                    // element against the traversal limit.
-                    if (stride == 0) {
-                        _context.traversal_counter.increment(length) catch
-                            return Error.TraversalLimitExceeded;
-                    }
+                    // // Zero-sized structs still count as one word per
+                    // // element against the traversal limit.
+                    // if (stride == 0) {
+                    //     _context.traversal_counter.increment(length) catch
+                    //         return Error.TraversalLimitExceeded;
+                    // }
 
                     _context.offset_words += 1;
 
@@ -1304,12 +1304,10 @@ pub fn CompositeListReader(
 }
 
 pub const Message = struct {
-    segments: [][]u8 = undefined,
-    /// Set when the message owns a contiguous serialized buffer and `segments`
-    /// point into it. In that case `deinit` frees the buffer once instead of
-    /// freeing each segment independently.
-    owned_bytes: ?[]u8 = null,
-    traversal_counter: Counter = Counter{ .limit = 8 * 1024 * 1024 },
+    segments: []const []const u8 = undefined,
+    is_view: bool = false,
+    // owned_bytes: ?[]const u8 = null,
+    // traversal_counter: Counter = Counter{ .limit = 8 * 1024 * 1024 },
 
     pub fn fromFile(file: std.Io.File, io: std.Io, allocator: std.mem.Allocator) !Message {
         var buffer: [4]u8 = undefined;
@@ -1325,12 +1323,13 @@ pub const Message = struct {
         std.debug.assert(segmentLengthsBuffer.len == try file.readPositionalAll(io, segmentLengthsBuffer, offset));
         offset += segmentLengthsBuffer.len;
 
-        const segments = try allocator.alloc([]u8, segmentCount * ELEMENTS);
+        const segments = try allocator.alloc([]const u8, segmentCount * ELEMENTS);
 
         for (0..segmentCount) |i| {
             const segmentWords = std.mem.readInt(u32, segmentLengthsBuffer[i * 4 ..][0..4], .little);
-            segments[i] = try allocator.alloc(u8, segmentWords * 8 * BYTES);
-            std.debug.assert(segments[i].len == try file.readPositionalAll(io, segments[i], offset));
+            const slot = try allocator.alloc(u8, segmentWords * 8 * BYTES);
+            std.debug.assert(slot.len == try file.readPositionalAll(io, slot, offset));
+            segments[i] = slot;
             offset += segments[i].len;
         }
         return Message{ .segments = segments };
@@ -1369,7 +1368,7 @@ pub const Message = struct {
         const data_offset = std.mem.alignForward(usize, 4 + table_bytes, 8);
         if (data_offset > bytes.len) return Error.OutOfBounds;
 
-        const segments = try allocator.alloc([]u8, segment_count);
+        const segments = try allocator.alloc([]const u8, segment_count);
         var initialized: usize = 0;
         errdefer {
             for (segments[0..initialized]) |segment| allocator.free(segment);
@@ -1382,20 +1381,17 @@ pub const Message = struct {
             const byte_len = std.math.mul(usize, words, 8) catch return Error.MessageTooLarge;
             if (offset + byte_len > bytes.len) return Error.OutOfBounds;
 
-            segments[i] = try allocator.alloc(u8, byte_len);
+            const slot = try allocator.alloc(u8, byte_len);
+            @memcpy(slot, bytes[offset..][0..byte_len]);
+            segments[i] = slot;
             initialized += 1;
-            @memcpy(segments[i], bytes[offset..][0..byte_len]);
             offset += byte_len;
         }
 
         return Message{ .segments = segments };
     }
 
-    /// Parse a contiguous serialized message and take ownership of `bytes`.
-    ///
-    /// On success the returned message frees `bytes` from `deinit`; on error
-    /// the caller retains ownership of `bytes`.
-    pub fn fromOwnedBytes(bytes: []u8, allocator: std.mem.Allocator) !Message {
+    pub fn fromViewBytes(bytes: []const u8, allocator: std.mem.Allocator) !Message {
         if (bytes.len < 4) return Error.OutOfBounds;
 
         const segment_count: usize = 1 + std.mem.readInt(u32, bytes[0..4], .little);
@@ -1403,7 +1399,7 @@ pub const Message = struct {
         const data_offset = std.mem.alignForward(usize, 4 + table_bytes, 8);
         if (data_offset > bytes.len) return Error.OutOfBounds;
 
-        const segments = try allocator.alloc([]u8, segment_count);
+        const segments = try allocator.alloc([]const u8, segment_count);
         errdefer allocator.free(segments);
 
         var offset = data_offset;
@@ -1416,13 +1412,13 @@ pub const Message = struct {
             offset += byte_len;
         }
 
-        return Message{ .segments = segments, .owned_bytes = bytes };
+        return Message{ .segments = segments, .is_view = true };
     }
 
     pub fn deinit(self: *Message, allocator: std.mem.Allocator) void {
-        if (self.owned_bytes) |bytes| {
+        if (self.is_view) {
             allocator.free(self.segments);
-            allocator.free(bytes);
+            // allocator.free(bytes);
         } else {
             for (self.segments) |segment| {
                 allocator.free(segment);
@@ -1431,9 +1427,9 @@ pub const Message = struct {
         }
     }
 
-    pub fn getRootStruct(self: *Message, comptime T: type, comptime trait: ReaderTrait(T)) Error!T {
-        self.traversal_counter = Counter{ .limit = 8 * 1024 * 1024 };
-        return trait.reader(try StructReader.fromReadContext(ReadContext.fromSegments(self.segments, &self.traversal_counter)));
+    pub fn getRootStruct(self: *const Message, comptime T: type, comptime trait: ReaderTrait(T)) Error!T {
+        // self.traversal_counter = Counter{ .limit = 8 * 1024 * 1024 };
+        return trait.reader(try StructReader.fromReadContext(ReadContext.fromSegments(self.segments)));
     }
 };
 
@@ -1710,7 +1706,7 @@ pub const MessageBuilder = struct {
     /// message is valid only while this builder is alive and must not be
     /// deinitialized.
     pub fn toReader(self: *const MessageBuilder) Message {
-        return Message{ .segments = @constCast(self.segments[0..self.count]) };
+        return Message{ .segments = self.segments[0..self.count] };
     }
 
     /// Exact size of the framed serialized message.

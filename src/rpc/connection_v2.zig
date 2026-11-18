@@ -1,13 +1,13 @@
 const std = @import("std");
 
-const capnp = @import("../capnp.zig"); // TODO use capnp library instead
-// const capnp = @import("capnp");
+// const capnp = @import("../capnp.zig"); // TODO use capnp library instead
+const capnp = @import("capnp");
 const rpc = @import("generated/rpc.zig");
 const twoparty = @import("generated/rpc_twoparty.zig");
 const wire = @import("wire.zig");
 
 const Transport = @import("transports/mod.zig").Transport;
-const MessageParts = @import("transport.zig").MessageParts;
+const MessageParts = @import("wire.zig").MessageParts;
 const SlotMap = @import("slot_map.zig").SlotMap;
 
 pub const Side = twoparty.Side;
@@ -18,7 +18,7 @@ pub const Side = twoparty.Side;
 /// table).  The questioner (caller) chooses an ID when making a call.  The ID remains valid in
 /// caller -> callee messages until a Finish message is sent, and remains valid in callee -> caller
 /// messages until a Return message is sent.
-pub const QuestionId = i32;
+pub const QuestionId = u32;
 
 /// **(level 0)**
 ///
@@ -28,7 +28,7 @@ pub const QuestionId = i32;
 /// AnswerId is physically equivalent to QuestionId, since the question and answer tables correspond,
 /// but we define a separate type for documentation purposes:  we always use the type representing
 /// the sender's point of view.
-pub const AnswerId = i32;
+pub const AnswerId = u32;
 
 /// **(level 1)**
 ///
@@ -51,7 +51,7 @@ pub const AnswerId = i32;
 /// When a connection is lost, all exports are implicitly released.  It is not possible to restore
 /// a connection state after disconnect (although a transport layer could implement a concept of
 /// persistent connections if it is transparent to the RPC layer).
-pub const ExportId = i32;
+pub const ExportId = u32;
 
 /// **(level 1)**
 ///
@@ -64,30 +64,33 @@ pub const ExportId = i32;
 ///
 /// An `ImportId` remains valid in importer -> exporter messages until the importer has sent
 /// `Release` messages that (it believes) have reduced the reference count to zero.
-pub const ImportId = i32;
+pub const ImportId = u32;
 
 pub const ConnectionV2 = struct {
     allocator: std.mem.Allocator,
+    log_ctx: []const u8,
+
+    is_destroyed: bool = false,
 
     transport: Transport,
-    side: Side,
     bootstrap_cap_id: u32 = 0,
 
-    exports: SlotMap(ExportedCapability) = .init(),
+    exports: SlotMap(ExportedCapability) = .{},
     imports: std.AutoHashMapUnmanaged(u32, ImportedCapability) = .empty,
 
     questions: SlotMap(Question) = .init(),
-    answers: std.AutoHashMapUnmanaged(u32, Answer) = .init(),
+    answers: std.AutoHashMapUnmanaged(u32, Answer) = .{},
 
-    pub fn init(allocator: std.mem.Allocator, transport: Transport, side: Side) ConnectionV2 {
+    pub fn init(allocator: std.mem.Allocator, transport: Transport, log_ctx: []const u8) ConnectionV2 {
         return .{
             .allocator = allocator,
             .transport = transport,
-            .side = side,
+            .log_ctx = log_ctx,
         };
     }
 
     pub fn destroy(self: *ConnectionV2) void {
+        if (self.is_destroyed) return;
         self.exports.deinit(self.allocator);
         self.imports.deinit(self.allocator);
         self.questions.deinit(self.allocator);
@@ -98,12 +101,10 @@ pub const ConnectionV2 = struct {
             }
             self.answers.deinit(self.allocator);
         }
+        self.is_destroyed = true;
     }
 
     pub fn setBootstrap(self: *ConnectionV2, capability: LocalCapability) !void {
-        if (self.side == .client) {
-            @panic("can only set a bootstrap capability in the server side");
-        }
         if (self.exports.get(self.bootstrap_cap_id) != null) {
             // TODO?: should we support several bootsrap initializations?
             @panic("Initialize bootstrap only once");
@@ -121,44 +122,53 @@ pub const ConnectionV2 = struct {
     pub fn bootstrap(
         self: *ConnectionV2,
         context: ?*anyopaque,
-        on_return: fn (context: ?*anyopaque, returns: *rpc.Return.Reader) void,
+        on_return: fn (context: ?*anyopaque, returns: *const rpc.Return.Reader) void,
     ) !QuestionId {
         // This MessageBuilder should allocate the bytes segments in the stack
         var message = try capnp.GrowableMessage.init(self.allocator, message_initial_segment_bytes);
         defer message.deinit();
 
         const question = try self.newQuestion(context, on_return);
-        errdefer self.questions.remove(question.id);
+        errdefer _ = self.questions.remove(question.id);
 
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
         var bootstrap_message = try root.setBootstrap();
         bootstrap_message.setQuestionId(question.id);
 
-        try self.send(&message);
+        try self.send(&message.builder);
 
         return question.id;
     }
 
-    pub fn beginCall(
+    // pub fn beginCall() void {}
+
+    // pub fn makePromisedCall(
+    //     self: *ConnectionV2,
+    //     question_id: u32,
+    //     context: ?*anyopaque,
+    //     on_return: fn (context: ?*anyopaque, returns: *const rpc.Return.Reader) void,
+    // ) void {}
+
+    pub fn makeCall(
         self: *ConnectionV2,
         call_reader: rpc.Call.Reader,
         context: ?*anyopaque,
-        on_return: fn (context: ?*anyopaque, returns: *rpc.Return.Reader) void,
-    ) !void {
+        on_return: fn (context: ?*anyopaque, returns: *const rpc.Return.Reader) void,
+    ) !QuestionId {
         // Maybe capnp.MessageBuilder should be pooled
         var message = try capnp.GrowableMessage.init(self.allocator, message_initial_segment_bytes);
         defer message.deinit();
 
         const question = try self.newQuestion(context, on_return);
-        errdefer self.questions.remove(question.id);
+        errdefer _ = self.questions.remove(question.id);
 
         var root = try message.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait);
         var call = try root.setCall();
-        try call.copyFrom(call_reader);
+        call.copyFrom(call_reader);
         call.setQuestionId(question.id);
         call.setAllowThirdPartyTailCall(false);
 
-        try self.send(&message);
+        try self.send(&message.builder);
 
         return question.id;
     }
@@ -180,7 +190,7 @@ pub const ConnectionV2 = struct {
     fn newQuestion(
         self: *ConnectionV2,
         context: ?*anyopaque,
-        on_return: fn (context: ?*anyopaque, returns: *rpc.Return.Reader) void,
+        on_return: fn (context: ?*anyopaque, returns: *const rpc.Return.Reader) void,
     ) !*Question {
         const id = try self.questions.add(self.allocator, .{
             .id = 0,
@@ -192,10 +202,11 @@ pub const ConnectionV2 = struct {
         return question;
     }
 
-    pub fn onMessage(self: *ConnectionV2, frame: []const u8) void {
-        var msg = try capnp.Message.fromOwnedBytes(frame, self.allocator);
+    pub fn onMessage(self: *ConnectionV2, frame: []const u8) !void {
+        var msg = try capnp.Message.fromViewBytes(frame, self.allocator);
         defer msg.deinit(self.allocator);
         const message = try msg.getRootStruct(rpc.Message.Reader, rpc.Message.reader_trait);
+        std.log.scoped(.capnp_rpc).debug("{s}: on message which {}", .{ self.log_ctx, message.which() });
 
         switch (message.which()) {
             .unimplemented => {
@@ -226,11 +237,11 @@ pub const ConnectionV2 = struct {
                 var buffer: [buffer_size]u8 = undefined;
 
                 var response_builder = capnp.MessageBuilder.initBuffer(&buffer);
-
-                const returns = response_builder.initRootStruct(
-                    rpc.Return.Builder,
-                    rpc.Return.builder_trait,
+                var response_message = response_builder.initRootStruct(
+                    rpc.Message.Builder,
+                    rpc.Message.builder_trait,
                 ) catch |err| unreachable_err(err);
+                const returns = response_message.setReturn() catch |err| unreachable_err(err);
 
                 returns.setAnswerId(bootstraps.questionId());
                 returns.setReleaseParamCaps(true);
@@ -242,24 +253,27 @@ pub const ConnectionV2 = struct {
                 try cap_table.init(1);
                 cap_table.get(0).setSenderHosted(self.bootstrap_cap_id);
 
-                self.send(&response_builder);
+                self.send(&response_builder) catch |err| std.debug.panic("TODO {}", .{err});
             },
             .call => {
                 const call = (try message.call()).?;
 
-                self.onCall(&call, frame);
+                self.onCall(&call, frame) catch |err| std.debug.panic("TODO {}", .{err});
             },
             .@"return" => {
                 const returns = (try message.@"return"()).?;
                 const anwser_id = returns.answerId();
 
                 if (self.questions.get(anwser_id)) |question| {
-                    question.on_return(question.context, returns);
-                    self.questions.remove(question.id);
+                    std.log.scoped(.capnp_rpc).debug("{s}: return on existing question id {}", .{ self.log_ctx, anwser_id });
+                    question.on_return(question.context, &returns);
+                    _ = self.questions.remove(question.id);
 
                     var buffer: [wire.finish_size]u8 = undefined;
                     const finish_message = try wire.buildFinishInto(&buffer, question.id, true);
-                    self.send(&finish_message);
+                    try self.send(&finish_message);
+                } else {
+                    std.log.scoped(.capnp_rpc).debug("{s}: return question id {} but question was not found", .{ self.log_ctx, anwser_id });
                 }
             },
             .finish => {
@@ -304,13 +318,13 @@ pub const ConnectionV2 = struct {
                 const join = (try message.join()).?;
                 _ = join;
             },
+            else => @panic("TODO: send unsupported"),
         }
     }
 
-    fn onCall(self: *ConnectionV2, call: *const rpc.Call.Reader, frame: []u8) !void {
+    fn onCall(self: *ConnectionV2, call: *const rpc.Call.Reader, frame: []const u8) !void {
         const answer_id = call.questionId();
         const target = try call.target();
-        const method_id = call.methodId();
 
         const sendTo = call.sendResultsTo();
         switch (sendTo.which()) {
@@ -320,12 +334,9 @@ pub const ConnectionV2 = struct {
             },
         }
 
-        const params = try call.params();
-        const entry = try self.answers.getOrPut(
-            self.allocator,
-            answer_id,
-            Answer{ .id = answer_id },
-        );
+        const entry = try self.answers.getOrPut(self.allocator, answer_id);
+        entry.value_ptr.zero_init();
+        entry.value_ptr.id = answer_id;
         entry.value_ptr.frame = try self.allocator.dupe(u8, frame);
 
         switch (target.which()) {
@@ -333,18 +344,15 @@ pub const ConnectionV2 = struct {
                 const cap = target.importedCap().?;
 
                 const expo = self.exports.get(cap) orelse {
-                    @panic("TODO: send exepction Unknown capability");
+                    std.debug.panic("TODO: send exepction Unknown capability 0x{x}", .{cap});
                 };
+                std.log.scoped(.capnp_rpc).debug("{s}: call on imported capability 0x{x}", .{ self.log_ctx, cap });
 
-                try self.dispatchLocalCapabilityCall(
-                    &params,
-                    &expo.local,
-                    entry.value_ptr,
-                );
+                self.dispatchLocalCapabilityCall(&expo.local, entry.value_ptr);
             },
             .promisedAnswer => {
                 const promise = (try target.promisedAnswer()).?;
-                self.onCallPromisedAnswer(&params, method_id, &promise);
+                self.onCallPromisedAnswer(entry.value_ptr, &promise) catch |err| std.debug.panic("TODO: {}", .{err});
             },
             else => {
                 @panic("TODO: send unsuported target");
@@ -356,8 +364,8 @@ pub const ConnectionV2 = struct {
         self: *ConnectionV2,
         local: *LocalCapability,
         answer: *Answer,
-    ) !void {
-        const call_message = try capnp.Message.fromOwnedBytes(answer.frame, self.allocator);
+    ) void {
+        var call_message = capnp.Message.fromViewBytes(answer.frame, self.allocator) catch @panic("TODO");
         defer call_message.deinit(self.allocator);
 
         const call_message_reader = call_message.getRootStruct(rpc.Message.Reader, rpc.Message.reader_trait) catch |err| unreachable_err(err);
@@ -365,64 +373,33 @@ pub const ConnectionV2 = struct {
         const params = call_reader.params() catch |err| unreachable_err(err).?;
         const method_id = call_reader.methodId();
 
-        var response = try capnp.GrowableMessage.init(self.allocator, message_initial_segment_bytes);
+        var response = capnp.GrowableMessage.init(self.allocator, message_initial_segment_bytes) catch @panic("TODO");
         defer response.deinit();
 
-        var root = try response.initRootStruct(
-            rpc.Message.Builder,
-            rpc.Message.builder_trait,
-        );
-        var results = try root.setReturn();
+        var root = response.initRootStruct(rpc.Message.Builder, rpc.Message.builder_trait) catch |err| unreachable_err(err);
+        var results = root.setReturn() catch |err| unreachable_err(err);
+        results.setAnswerId(answer.id);
 
-        const call_context = CallContext{
+        var call_context = CallContext{
             .connection = &.{},
             .params = &params,
             .results = &results,
         };
 
-        local.dispatch(local.context, method_id, call_context) catch {
+        local.dispatch(local.context, method_id, &call_context) catch {
             @panic("TODO: send exception");
         };
 
         // TODO: maybe we could just save the growable message as an optimization.
         const size = response.serializedSize();
-        const response_buffer_cpy = try self.allocator.alloc(u8, size);
-        response.writeToBuffer(response_buffer_cpy) catch |err| unreachable_err(err);
+        const response_buffer_cpy = self.allocator.alloc(u8, size) catch @panic("TODO OOM");
+        _ = response.writeToBuffer(response_buffer_cpy) catch |err| unreachable_err(err);
         answer.return_frame = response_buffer_cpy;
 
         switch (results.which()) {
             .results => {
-                const payload = (try call_context.results.results()).?.asReader();
-
                 answer.dispatch_pending(self);
-
-                var it = answer.pending_calls.first;
-                while (it) |node| {
-                    const pending: *PendingCall = @fieldParentPtr("node", node);
-                    const pending_answer = self.answers.getPtr(pending.answer_id) orelse @panic("BUG: pending answer released but pending call is alive");
-                    it = node.next;
-                    const cap_descriptor = pending.apply_transform(&payload);
-
-                    switch (cap_descriptor.which()) {
-                        .none => @panic("TODO: how to handle this?"),
-                        // the author of the answer is the current vat
-                        // so this capability is in our exports
-                        .senderHosted => {
-                            const cap_index = cap_descriptor.senderHosted().?;
-                            const capability = self.exports.get(cap_index) orelse {
-                                @panic("TODO: send exception");
-                            };
-
-                            try self.dispatchLocalCapabilityCall(
-                                &pending.params,
-                                pending.method_id,
-                                &capability.local,
-                                pending_answer,
-                            );
-                        },
-                        else => @panic("TODO"),
-                    }
-                }
+                self.send(&response.builder) catch @panic("TODO");
             },
             else => @panic("TODO"),
         }
@@ -436,12 +413,14 @@ pub const ConnectionV2 = struct {
         const promised_answer_id = promise.questionId();
 
         const promised_answer = self.answers.getPtr(promised_answer_id) orelse {
-            var new_answer = Answer{ .id = promised_answer_id };
+            var new_answer: Answer = undefined;
+            new_answer.zero_init();
+            new_answer.id = promised_answer_id;
 
-            const pending_call = try PendingCall.init(self.allocator, answer.id, &promise);
+            const pending_call = try PendingCall.init(self.allocator, answer.id, promise);
             new_answer.pending_calls.append(&pending_call.node);
 
-            self.answers.put(self.allocator, promised_answer_id, new_answer);
+            try self.answers.put(self.allocator, promised_answer_id, new_answer);
             return;
         };
 
@@ -453,8 +432,8 @@ pub const ConnectionV2 = struct {
             return;
         }
 
-        const returns = promised_answer.return_frame orelse {};
-        _ = returns;
+        // const returns = promised_answer.return_frame orelse {};
+        // _ = returns;
         @panic("TODO: answer is already here. Use it");
     }
 };
@@ -462,13 +441,13 @@ pub const ConnectionV2 = struct {
 pub const ConnectionContext = struct {};
 
 pub const CallContext = struct {
-    conection: *const ConnectionContext,
-    params: *rpc.Payload.Reader,
+    connection: *const ConnectionContext,
+    params: *const rpc.Payload.Reader,
     results: *rpc.Return.Builder,
 };
 
 pub const DispatchFn = *const fn (
-    context: *anyopaque,
+    context: ?*anyopaque,
     method_id: u16,
     call_context: *CallContext,
 ) anyerror!void;
@@ -515,7 +494,9 @@ pub const ImportedCapability = struct {
 pub const Question = struct {
     id: u32,
     context: ?*anyopaque,
-    on_return: *const fn (context: ?*anyopaque, returns: *rpc.Return.Reader) void,
+    on_return: *const fn (context: ?*anyopaque, returns: *const rpc.Return.Reader) void,
+
+    // fn makeCall() void {}
 };
 
 const _empty_byte_slice: [0]u8 = .{};
@@ -528,21 +509,28 @@ pub const Answer = struct {
     // bytes that decode into a rpc.Message from the return message
     return_frame: []const u8 = &_empty_byte_slice,
 
+    fn zero_init(self: *Answer) void {
+        self.id = 0;
+        self.pending_calls = .{};
+        self.frame = &_empty_byte_slice;
+        self.return_frame = &_empty_byte_slice;
+    }
+
     fn deinit(self: *Answer, allocator: std.mem.Allocator) void {
         if (self.frame.len > 0) allocator.free(self.frame);
         if (self.return_frame.len > 0) allocator.free(self.return_frame);
     }
 
     fn dispatch_pending(self: *Answer, conn: *ConnectionV2) void {
-        const msg = try capnp.Message.fromOwnedBytes(self.return_frame, conn.allocator);
-        msg.deinit(conn.allocator);
-        const message = try msg.getRootStruct(rpc.Message.Reader, rpc.Message.reader_trait);
-        const returns = (try message.@"return"()).?;
-        const payload = (try returns.results()).?;
+        var msg = capnp.Message.fromViewBytes(self.return_frame, conn.allocator) catch @panic("TODO");
+        defer msg.deinit(conn.allocator);
+        const message = msg.getRootStruct(rpc.Message.Reader, rpc.Message.reader_trait) catch |err| unreachable_err(err);
+        const returns = (message.@"return"() catch |err| unreachable_err(err)).?;
+        const payload = (returns.results() catch |err| unreachable_err(err)).?;
 
         while (self.pending_calls.popFirst()) |node| {
             const pending: *PendingCall = @fieldParentPtr("node", node);
-            const pending_answer = self.answers.getPtr(pending.answer_id) orelse @panic("BUG: pending answer released but pending call is alive");
+            const pending_answer = conn.answers.getPtr(pending.answer_id) orelse @panic("BUG: pending answer released but pending call is alive");
             const cap_descriptor = pending.apply_transform(&payload);
 
             switch (cap_descriptor.which()) {
@@ -551,11 +539,11 @@ pub const Answer = struct {
                 // so this capability is in our exports
                 .senderHosted => {
                     const cap_index = cap_descriptor.senderHosted().?;
-                    const capability = self.exports.get(cap_index) orelse {
+                    const capability = conn.exports.get(cap_index) orelse {
                         @panic("TODO: send exception");
                     };
 
-                    try conn.dispatchLocalCapabilityCall(&capability.local, pending_answer);
+                    conn.dispatchLocalCapabilityCall(&capability.local, pending_answer);
                 },
                 else => @panic("TODO"),
             }
@@ -582,9 +570,9 @@ const PendingCall = struct {
         const pending_call = try allocator.create(PendingCall);
         pending_call.answer_id = answer_id;
 
-        var len = 0;
+        var len: u32 = 0;
         for (0..transform.length) |i| {
-            const op = transform.get(i);
+            const op = transform.get(@intCast(i));
             switch (op.which()) {
                 .noop => {},
                 .getPointerField => len += 1,
@@ -594,7 +582,7 @@ const PendingCall = struct {
 
         const operations = try allocator.alloc(Op, len);
         for (0..transform.length) |i| {
-            const op = transform.get(i);
+            const op = transform.get(@intCast(i));
             switch (op.which()) {
                 .noop => {},
                 .getPointerField => {
@@ -626,7 +614,7 @@ const PendingCall = struct {
                         .data_words = struct_.data_words,
                         .ptr_words = struct_.ptr_words,
                     };
-                    value = reader.readPtrField(capnp.AnyPointer, op.pointer_field) catch @panic("TODO send exception in pending call");
+                    value = reader.readPtrField(capnp.AnyPointerReader, op.pointer_field) catch @panic("TODO send exception in pending call");
                 },
                 else => @panic("TODO send exception in pending call"),
             }

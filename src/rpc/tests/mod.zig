@@ -1,5 +1,5 @@
 test {
-    // _ = @import("level0.zig");
+    _ = @import("connection_v2.zig");
     // _ = @import("capabilities.zig");
     // _ = @import("pipelining.zig");
     // _ = @import("multihop.zig");
